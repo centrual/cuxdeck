@@ -8,7 +8,7 @@
 from any browser on Earth. No accounts. No app store. No servers of ours
 in the middle. You install it, and it just works.*
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 [![Status](https://img.shields.io/badge/status-building%20v1-orange.svg)](#roadmap)
 [![Companion to cux](https://img.shields.io/badge/companion%20to-cux-8A2BE2.svg)](https://github.com/inulute/cux)
 
@@ -170,7 +170,9 @@ party who can see your data. If a step can be removed, it will be.
 
 ## License
 
-MIT — do anything you like with it. See [LICENSE](LICENSE).
+GPL-3.0-only — the same license as [cux](https://github.com/inulute/cux).
+Use it, change it, ship it; changes you distribute stay open too. See
+[LICENSE](LICENSE).
 
 <div align="center">
 <sub>Built alongside <a href="https://github.com/inulute/cux">cux</a>. Not affiliated with Anthropic.</sub>
