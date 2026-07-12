@@ -135,12 +135,12 @@ func (s *Store) Authenticate(token string) bool {
 	want := hex.EncodeToString(sum[:])
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	for i := range s.devices {
 		if subtle.ConstantTimeCompare([]byte(s.devices[i].TokenHash), []byte(want)) == 1 {
 			s.failures = 0
 			s.devices[i].LastSeen = time.Now().UTC()
 			s.save()
+			s.mu.Unlock()
 			return true
 		}
 	}
@@ -149,6 +149,11 @@ func (s *Store) Authenticate(token string) bool {
 	if delay > maxFailureDelay {
 		delay = maxFailureDelay
 	}
+	// Sleep OUTSIDE the lock: the punishment is for the failing caller
+	// only. Holding the mutex here would let a stale token's polling
+	// serialize every other request — including the pairing attempt
+	// that would fix the situation.
+	s.mu.Unlock()
 	time.Sleep(delay)
 	return false
 }

@@ -1,6 +1,6 @@
 <div align="center">
 
-# ⌁ cuxdeck
+<img src="assets/banner.svg" alt="cuxdeck — mission control for your cux fleet" width="880">
 
 ### Mission control for your overnight AI coding fleet — in your pocket.
 
