@@ -252,6 +252,19 @@ function cls(p){return p>=90?'b':p>=70?'w':''}
 function ringColor(p){return p>=90?'var(--bad)':p>=70?'var(--warn)':'var(--ok)'}
 function shortDir(d){const p=(d||'').replace(/\/+$/,'').split('/');
   return p.length>2?'…/'+p.slice(-2).join('/'):d}
+function inTime(iso){const s=(new Date(iso)-Date.now())/1e3;
+  if(s<=0)return'now';if(s<3600)return Math.ceil(s/60)+'m';
+  if(s<86400)return Math.floor(s/3600)+'h '+Math.round(s%3600/60)+'m';
+  return Math.floor(s/86400)+'d'}
+// Dolu ya da dolmaya yakın pencere için "ne zaman boşalıyor" satırı.
+function resetLine(u){
+  const rows=[];
+  for(const [w,label] of [[u.five_hour,'5h'],[u.seven_day,'7d']]){
+    if(w&&w.utilization>=90&&w.resets_at)
+      rows.push(label+' window frees in <b>'+inTime(w.resets_at)+'</b>');
+  }
+  return rows.length?'<div class="sub" style="text-align:center;margin-top:6px;padding-bottom:4px">⏳ '+rows.join(' · ')+'</div>':'';
+}
 function cacheKey(a){if(a.uuid&&a.orgUuid)return a.uuid+'|'+a.orgUuid;return a.orgUuid||a.email}
 function seatLabel(a){return a.alias||a.email.split('@')[0]}
 
@@ -340,8 +353,8 @@ function renderSeats(){
           :`<button class="btn ghost small" onclick="confirmSwitch(${a.slot},'${esc(seatLabel(a))}')">switch</button>`}
       </div>
       ${u?`<div class="row" style="gap:22px;justify-content:center;padding:4px 0 14px">
-        ${ring(f,'5 HOUR')}${ring(d7,'7 DAY')}
-      </div>${u.token_expired?'<div class="sub" style="color:var(--bad);text-align:center">⚠ needs login on the computer</div>':''}`
+        ${ring(f,'5H USED')}${ring(d7,'7D USED')}
+      </div>${resetLine(u)}${u.token_expired?'<div class="sub" style="color:var(--bad);text-align:center">⚠ needs login on the computer</div>':''}`
       :'<div class="sub">no usage data yet — tap refresh on the Deck tab</div>'}
     </div>`}).join('');
 }
