@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>cuxdeck</title>
+<style>
+:root{--bg:#0d1117;--card:#161b22;--line:#21262d;--fg:#e6edf3;--dim:#8b949e;
+--acc:#d97757;--ok:#3fb950;--warn:#d29922;--bad:#f85149;--r:14px}
+*{box-sizing:border-box;margin:0}
+body{background:var(--bg);color:var(--fg);font:15px/1.45 -apple-system,system-ui,sans-serif;
+padding-bottom:env(safe-area-inset-bottom)}
+header{position:sticky;top:0;background:rgba(13,17,23,.92);backdrop-filter:blur(10px);
+border-bottom:1px solid var(--line);padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+display:flex;align-items:center;gap:10px;z-index:5}
+header h1{font-size:17px;font-weight:700}
+header .host{color:var(--dim);font-size:13px;margin-left:auto}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ok);animation:p 2s infinite}
+@keyframes p{50%{opacity:.35}}
+nav{display:flex;gap:6px;padding:10px 12px;position:sticky;
+top:calc(38px + env(safe-area-inset-top));background:var(--bg);z-index:4}
+nav button{flex:1;background:var(--card);border:1px solid var(--line);color:var(--dim);
+padding:9px 0;border-radius:10px;font-size:14px;font-weight:600}
+nav button.on{color:var(--fg);border-color:var(--acc)}
+main{padding:4px 12px 24px;display:flex;flex-direction:column;gap:10px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:13px 14px}
+.card h3{font-size:14px;margin-bottom:2px;word-break:break-all}
+.sub{color:var(--dim);font-size:12.5px}
+.badge{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:99px;
+background:#1f6feb26;color:#79c0ff;text-transform:uppercase;letter-spacing:.4px}
+.badge.running{background:#3fb95026;color:var(--ok)}
+.badge.waiting-reset{background:#d2992226;color:var(--warn)}
+.badge.retrying{background:#f8514926;color:var(--bad)}
+.bar{height:7px;background:var(--line);border-radius:99px;overflow:hidden;margin:5px 0 2px}
+.bar i{display:block;height:100%;background:var(--ok);border-radius:99px;transition:width .6s}
+.bar i.w{background:var(--warn)}.bar i.b{background:var(--bad)}
+.row{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.btn{background:var(--acc);border:0;color:#fff;font-weight:700;font-size:13px;
+padding:8px 14px;border-radius:10px}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--dim)}
+.btn:active{opacity:.7}
+.empty{color:var(--dim);text-align:center;padding:34px 0;font-size:14px}
+#pair{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;
+justify-content:center;align-items:center;gap:14px;padding:32px;z-index:50}
+#pair h2{font-size:22px}#pair p{color:var(--dim);text-align:center;max-width:300px}
+#pair input{background:var(--card);border:1px solid var(--line);color:var(--fg);
+font:600 18px ui-monospace,monospace;letter-spacing:3px;text-transform:uppercase;
+padding:12px;border-radius:12px;width:230px;text-align:center}
+#toast{position:fixed;bottom:calc(18px + env(safe-area-inset-bottom));left:50%;
+transform:translateX(-50%);background:#1f2937;border:1px solid var(--line);
+padding:10px 18px;border-radius:12px;font-size:14px;opacity:0;transition:opacity .25s;
+pointer-events:none;max-width:88vw}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div id="pair" class="hidden">
+  <h2>⌁ cuxdeck</h2>
+  <p>Enter the pairing code shown on your computer to link this device.</p>
+  <input id="code" placeholder="CODE" autocomplete="off" autocapitalize="characters">
+  <button class="btn" onclick="pair()">Pair this device</button>
+  <p id="pairErr" style="color:var(--bad)"></p>
+</div>
+
+<header><span class="dot" id="dot"></span><h1>⌁ cuxdeck</h1><span class="host" id="host"></span></header>
+<nav>
+  <button id="t-sessions" class="on" onclick="tab('sessions')">Sessions</button>
+  <button id="t-seats" onclick="tab('seats')">Seats</button>
+  <button id="t-projects" onclick="tab('projects')">Projects</button>
+</nav>
+<main id="main"><div class="empty">Connecting…</div></main>
+<div id="toast"></div>
+
+<script>
+let TOK=localStorage.getItem('cuxdeck.token')||'';
+let CUR='sessions', DECK=null;
+
+const $=id=>document.getElementById(id);
+function toast(m){const t=$('toast');t.textContent=m;t.style.opacity=1;
+  setTimeout(()=>t.style.opacity=0,2600)}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+
+async function api(path,opts={}){
+  opts.headers=Object.assign({'Authorization':'Bearer '+TOK,'Content-Type':'application/json'},opts.headers);
+  const r=await fetch(path,opts);
+  if(r.status===401){showPair();throw new Error('unauthorized')}
+  if(!r.ok)throw new Error((await r.json().catch(()=>({}))).error||r.status);
+  return r.json();
+}
+
+function showPair(){$('pair').classList.remove('hidden')}
+async function pair(){
+  const code=$('code').value.trim();
+  if(!code)return;
+  try{
+    const r=await fetch('/api/pair',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({code,name:navigator.platform||'device'})});
+    if(!r.ok)throw 0;
+    TOK=(await r.json()).token;
+    localStorage.setItem('cuxdeck.token',TOK);
+    $('pair').classList.add('hidden');history.replaceState(null,'',location.pathname);refresh();
+  }catch{$('pairErr').textContent='Invalid or expired code — generate a new one on the computer.'}
+}
+
+// URL fragment pairing: the QR encodes  https://…/#p=CODE
+(function(){
+  const m=location.hash.match(/p=([A-Z0-9]+)/i);
+  if(m){$('code').value=m[1].toUpperCase();showPair();pair();}
+  else if(!TOK){showPair();}
+})();
+
+function ago(iso){const s=(Date.now()-new Date(iso))/1e3;
+  if(s<90)return Math.round(s)+'s';if(s<5400)return Math.round(s/60)+'m';
+  if(s<129600)return (s/3600).toFixed(1)+'h';return Math.round(s/86400)+'d'}
+function barCls(p){return p>=90?'b':p>=70?'w':''}
+
+function render(){
+  if(!DECK)return;
+  $('host').textContent=DECK.hostname;
+  const M=$('main');
+  if(CUR==='sessions'){
+    const ss=DECK.sessions||[];
+    M.innerHTML=ss.length?ss.map(s=>`
+      <div class="card">
+        <div class="row"><h3>${esc(shortDir(s.cwd))}</h3>
+          <span class="badge ${esc(s.state)}">${esc(s.state)}</span></div>
+        <div class="sub">seat ${esc(s.seat||'—')} · up ${ago(s.startedAt)}${s.detail?' · '+esc(s.detail):''}</div>
+      </div>`).join('')
+      :'<div class="empty">No cux sessions running right now.</div>';
+  }
+  if(CUR==='seats'){
+    const accts=Object.values(DECK.accounts||{});
+    M.innerHTML=(accts.length?accts.map(a=>{
+      const u=(DECK.usage||{})[cacheKey(a)]||{};
+      const f=u.five_hour?.utilization??null,d7=u.seven_day?.utilization??null;
+      const active=a.slot===DECK.activeSlot;
+      return `<div class="card">
+        <div class="row"><h3>${esc(a.alias?a.alias+' · ':'')}${esc(a.email)}</h3>
+          ${active?'<span class="badge running">active</span>':
+          `<button class="btn ghost" onclick="act('switch',{target:'${a.slot}'},'Switching…')">switch</button>`}</div>
+        ${f===null?'<div class="sub">no usage data</div>':`
+        <div class="sub">5h ${Math.round(f)}%</div><div class="bar"><i class="${barCls(f)}" style="width:${f}%"></i></div>
+        <div class="sub">7d ${Math.round(d7??0)}%</div><div class="bar"><i class="${barCls(d7??0)}" style="width:${d7??0}%"></i></div>`}
+        ${u.token_expired?'<div class="sub" style="color:var(--bad)">needs login</div>':''}
+      </div>`}).join(''):'<div class="empty">No seats yet — run `cux add` on the computer.</div>')
+      +`<button class="btn ghost" style="margin-top:4px" onclick="act('usage-refresh',{},'Refreshing usage…')">↻ refresh usage</button>`;
+  }
+  if(CUR==='projects'){
+    const ps=Object.values(DECK.projects||{});
+    M.innerHTML=(ps.length?ps.map(p=>`
+      <div class="card">
+        <div class="row"><h3>${esc(p.name)}</h3>
+          <button class="btn ghost" onclick="if(confirm('Remove project ${esc(p.name)}? Accounts are untouched.'))act('project-remove',{name:'${esc(p.name)}'},'Removing…')">remove</button></div>
+        <div class="sub">${esc(p.dir)}</div>
+        <div class="sub" style="margin-top:6px">seats: ${(p.slots||[]).map(sl=>{
+          const a=(DECK.accounts||{})[sl];return esc(a?(a.alias||a.email):('#'+sl))
+        }).join(', ')||'— (full pool)'}
+        </div>
+        <div style="margin-top:8px;display:flex;gap:8px">
+          <button class="btn ghost" onclick="assign('${esc(p.name)}',true)">+ seat</button>
+          <button class="btn ghost" onclick="assign('${esc(p.name)}',false)">− seat</button>
+        </div>
+      </div>`).join(''):'<div class="empty">No projects defined.</div>')
+      +`<button class="btn" style="margin-top:4px" onclick="createProject()">+ new project</button>`;
+  }
+}
+function shortDir(d){const parts=(d||'').split('/');return parts.slice(-2).join('/')||d}
+function cacheKey(a){if(a.uuid&&a.orgUuid)return a.uuid+'|'+a.orgUuid;
+  return a.orgUuid||a.email}
+
+function tab(t){CUR=t;
+  ['sessions','seats','projects'].forEach(x=>$('t-'+x).classList.toggle('on',x===t));render()}
+
+async function act(action,args,msg){
+  toast(msg||'Working…');
+  try{const r=await api('/api/action',{method:'POST',body:JSON.stringify({action,args})});
+    toast(r.ok?'Done':('cux: '+(r.output||'').trim().split('\n').pop()));refresh();
+  }catch(e){toast('Failed: '+e.message)}
+}
+function assign(name,add){
+  const seat=prompt((add?'Assign':'Unassign')+' which seat? (slot, alias, or email)');
+  if(seat)act(add?'project-assign':'project-unassign',{name,seat:seat.trim()},'Saving…');
+}
+function createProject(){
+  const name=prompt('Project name (lowercase, digits, hyphens):');if(!name)return;
+  const dir=prompt('Absolute directory it covers:');if(!dir)return;
+  act('project-create',{name:name.trim(),dir:dir.trim()},'Creating…');
+}
+
+async function refresh(){
+  if(!TOK)return;
+  try{DECK=await api('/api/deck');$('dot').style.background='var(--ok)';render()}
+  catch(e){if(e.message!=='unauthorized')$('dot').style.background='var(--bad)'}
+}
+refresh();setInterval(refresh,4000);
+</script>
+</body>
+</html>
