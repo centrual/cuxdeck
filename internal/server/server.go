@@ -33,6 +33,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/pair", s.pair)
 	mux.HandleFunc("GET /api/deck", s.authed(s.deck))
 	mux.HandleFunc("POST /api/action", s.authed(s.action))
+	mux.HandleFunc("GET /api/session/{pid}/chat", s.authed(s.chatStream))
 	mux.HandleFunc("GET /api/devices", s.authed(s.devices))
 	mux.HandleFunc("POST /api/devices/revoke", s.authed(s.revoke))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
@@ -66,6 +67,12 @@ func (s *Server) panel(w http.ResponseWriter, r *http.Request) {
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if tok == "" {
+			// EventSource (SSE) cannot set headers, so the chat stream
+			// passes the device token as a query param over the
+			// already-TLS'd tunnel. Same token, same check.
+			tok = r.URL.Query().Get("token")
+		}
 		if tok == "" || !s.Auth.Authenticate(tok) {
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
@@ -162,4 +169,18 @@ func (s *Server) newPairing(w http.ResponseWriter, r *http.Request) {
 
 func netSplitHost(hostport string) (string, string, error) {
 	return net.SplitHostPort(hostport)
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
 }

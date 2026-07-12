@@ -121,3 +121,9 @@ func LoadSessions() []Session {
 	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.Before(out[j].StartedAt) })
 	return out
 }
+
+// ClaudeProjectsDir is where Claude Code stores session transcripts.
+func ClaudeProjectsDir() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "projects")
+}
