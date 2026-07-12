@@ -155,28 +155,76 @@ nav button.on{color:var(--acc)}
 #chat .chead h2{font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #chat .chead .sub{font-size:12px}
 #clog{flex:1;overflow-y:auto;padding:14px 12px calc(20px + env(safe-area-inset-bottom));
-  display:flex;flex-direction:column;gap:10px;-webkit-overflow-scrolling:touch}
+  display:flex;flex-direction:column;gap:10px;-webkit-overflow-scrolling:touch;
+  overscroll-behavior:contain}
+body.chat-open{overflow:hidden;position:fixed;inset:0;width:100%}
 .msg{max-width:86%;padding:10px 13px;border-radius:16px;font-size:14.5px;line-height:1.5;
-  white-space:pre-wrap;word-break:break-word;animation:rise .28s both}
+  word-break:break-word;animation:rise .28s both}
 .msg.user{align-self:flex-end;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;
   border-bottom-right-radius:5px}
 .msg.assistant{align-self:flex-start;background:var(--card2);border:1px solid var(--line);
   border-bottom-left-radius:5px}
-.tool{align-self:flex-start;max-width:90%;display:flex;gap:8px;align-items:baseline;
-  font-size:12.5px;color:var(--dim);padding:2px 6px}
+.msg p{margin:0 0 8px}.msg p:last-child{margin:0}
+.msg code{font-family:ui-monospace,monospace;font-size:.88em;background:rgba(128,128,128,.22);
+  border-radius:4px;padding:1px 5px}
+.msg.user code{background:rgba(0,0,0,.25)}
+.msg pre{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 11px;
+  overflow-x:auto;margin:8px 0;max-width:100%}
+.msg pre code{background:none;padding:0;font-size:12px;white-space:pre}
+.msg.user pre{background:rgba(0,0,0,.3);border-color:transparent}
+.msg ul,.msg ol{margin:0 0 8px;padding-left:20px}
+.msg li{margin:2px 0}
+.msg h1,.msg h2,.msg h3,.msg h4{font-size:1.02em;margin:10px 0 6px}
+.msg a{color:var(--acc);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--acc) 40%,transparent)}
+.msg.user a{color:#fff}
+.msg blockquote{margin:6px 0;padding:2px 10px;border-left:3px solid var(--line);color:var(--dim)}
+.midturn{align-self:flex-end;font-size:10.5px;color:var(--faint);margin:-6px 4px 0 0}
+.tool{align-self:flex-start;max-width:92%;font-size:12.5px;color:var(--dim);padding:2px 6px}
+.tool .trow{display:flex;gap:8px;align-items:baseline}
+.tool.has-full .trow{cursor:pointer}
 .tool .tname{color:var(--fg);font-weight:700;white-space:nowrap}
 .tool .tdet{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--faint);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+.tool .tcaret{color:var(--faint);font-size:10px;flex:none}
+.tool .tfull{display:none;font-family:ui-monospace,monospace;font-size:11.5px;color:var(--dim);
+  background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:5px;
+  white-space:pre-wrap;word-break:break-all;max-height:40vh;overflow-y:auto;overscroll-behavior:contain}
+.tool.open .tfull{display:block}
+.tool.open .tcaret{transform:rotate(90deg);display:inline-block}
 .think{align-self:flex-start;max-width:88%;font-size:12.5px;color:var(--faint);font-style:italic;
-  padding:4px 10px;border-left:2px solid var(--line);white-space:pre-wrap}
-.think.clip{max-height:3.2em;overflow:hidden;cursor:pointer;
-  -webkit-mask-image:linear-gradient(#000 50%,transparent);mask-image:linear-gradient(#000 50%,transparent)}
+  padding:4px 10px;border-left:2px solid var(--line);cursor:pointer}
+.think .tprev{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
+.think .tbody{display:none;white-space:pre-wrap;margin-top:4px}
+.think.open .tprev{display:none}
+.think.open .tbody{display:block}
 .cdiv{align-self:center;font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;
   padding:8px 0;width:70%;text-align:center}
+.cdiv.command{font-family:ui-monospace,monospace;text-transform:none;letter-spacing:0;
+  background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 12px;width:auto;
+  max-width:86%;color:var(--dim)}
+.cdenied{align-self:flex-start;font-size:12px;color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,transparent);
+  border:1px solid color-mix(in srgb,var(--bad) 30%,transparent);border-radius:9px;padding:6px 11px}
+.cask{align-self:flex-start;max-width:88%;background:var(--card);border:1px solid var(--line);
+  border-radius:12px;padding:10px 13px;font-size:13px}
+.cask .qhead{font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--acc);margin-bottom:4px}
+.cask .qopts{margin-top:6px;font-size:11.5px;color:var(--faint)}
+.cask.answer{align-self:flex-end;border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
 .cstat{align-self:center;font-size:11.5px;color:var(--faint);padding:6px 0;display:flex;align-items:center;gap:7px}
 .cstat .pulse{width:7px;height:7px}
 .readonly{align-self:center;font-size:11.5px;color:var(--faint);background:var(--card);
   border:1px solid var(--line);border-radius:99px;padding:7px 14px;margin:2px 0 8px}
+#ctasks{display:none;border-bottom:1px solid var(--line);background:var(--bg2);
+  padding:8px 16px;font-size:12.5px;flex:none;max-height:38vh;overflow-y:auto;overscroll-behavior:contain}
+#ctasks.show{display:block}
+#ctasks .thead{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;color:var(--fg)}
+#ctasks .thead .prog{color:var(--faint);font-weight:400}
+#ctasks .tlist{display:none;margin-top:7px}
+#ctasks.open .tlist{display:block}
+#ctasks .titem{display:flex;gap:8px;padding:3px 0;color:var(--dim);align-items:baseline}
+#ctasks .titem .mark{flex:none;width:16px;text-align:center}
+#ctasks .titem.completed{color:var(--faint);text-decoration:line-through}
+#ctasks .titem.in_progress{color:var(--fg);font-weight:600}
+#ctasks .titem.in_progress .mark{color:var(--acc)}
 
 /* ---------- pairing ---------- */
 #pair{position:fixed;inset:0;z-index:50;background:
@@ -237,6 +285,7 @@ nav button.on{color:var(--acc)}
     <button class="back" onclick="closeChat()">‹</button>
     <div class="grow"><h2 id="chat-title">session</h2><div class="sub" id="chat-sub">—</div></div>
   </div>
+  <div id="ctasks" onclick="this.classList.toggle('open')"></div>
   <div id="clog"></div>
 </div>
 <div id="toast"></div>
@@ -538,7 +587,7 @@ async function doRevoke(id){
 }
 
 /* ---------- chat view (read-only conversation) ---------- */
-let CHAT_ES=null,CHAT_TICK=null,CHAT_ST=null;
+let CHAT_ES=null,CHAT_TICK=null,CHAT_ST=null,CHAT_SCROLL=0;
 function openChat(pid,title,seat){
   openStream('/api/session/'+pid+'/chat','seat '+seat,title);
 }
@@ -558,31 +607,48 @@ function openStream(url,subPrefix,title){
   const ro=document.createElement('div');ro.className='readonly';
   ro.textContent='👁 read-only — sending comes next';
   log.appendChild(ro);
+  // Lock the page behind the overlay so inner and outer scrolling never
+  // fight — restored (with scroll position) on close.
+  CHAT_SCROLL=window.scrollY;document.body.classList.add('chat-open');
+  const tk=$('ctasks');tk.classList.remove('show','open');tk.innerHTML='';
   // Status model: what the session is doing right now, derived from the
   // event stream the same way Claude Code's own status line is.
-  CHAT_ST={caughtUp:false,lastTs:0,last:null,turnStart:0,turnTokens:0,prefix:subPrefix};
+  CHAT_ST={caughtUp:false,lastTs:0,last:null,turnStart:0,turnTokens:0,prefix:subPrefix,
+    tasks:new Map(),todos:null,snap:false,queued:new Map()};
   // EventSource can't set headers, so the token rides the query string
   // over the already-TLS'd tunnel; the endpoint accepts either form.
   CHAT_ES=new EventSource(url+'?token='+encodeURIComponent(TOK));
-  let liveMark=null;
+  let liveMark=null,gotAny=false;
+  // A reconnect replays the whole transcript; start the render over so
+  // nothing shows up twice.
+  CHAT_ES.onopen=()=>{if(gotAny){
+    log.innerHTML='';log.appendChild(ro);liveMark=null;gotAny=false;
+    Object.assign(CHAT_ST,{caughtUp:false,tasks:new Map(),todos:null,turnTokens:0,snap:false,queued:new Map()});
+    $('ctasks').classList.remove('show');
+  }};
   CHAT_ES.onmessage=e=>{try{const ev=JSON.parse(e.data);
+    gotAny=true;
     trackStatus(ev);
     const n=renderEvent(ev);
     if(!n)return;
+    if(ev.role==='system'&&ev.kind==='caught-up'){
+      if(liveMark)liveMark.remove(); // only ever one live pill
+      liveMark=n;
+    }
     log.appendChild(n);
-    if(ev.role==='system'&&ev.kind==='caught-up')liveMark=n;
-    else if(liveMark)log.appendChild(liveMark); // keep the live pill pinned to the tail
+    if(liveMark&&n!==liveMark)log.appendChild(liveMark); // pinned to the tail
     stick()}catch{}};
   CHAT_ES.onerror=()=>{};
   CHAT_TICK=setInterval(renderStatus,1000);
 }
 function closeChat(){$('chat').classList.remove('show');
+  document.body.classList.remove('chat-open');window.scrollTo(0,CHAT_SCROLL||0);
   if(CHAT_ES){CHAT_ES.close();CHAT_ES=null}
   if(CHAT_TICK){clearInterval(CHAT_TICK);CHAT_TICK=null}}
 
 function trackStatus(ev){
   const st=CHAT_ST;if(!st)return;
-  if(ev.role==='system'&&ev.kind==='caught-up'){st.caughtUp=true;renderStatus();return}
+  if(ev.role==='system'&&ev.kind==='caught-up'){st.caughtUp=true;renderStatus();renderTasks();return}
   if(ev.ts){st.lastTs=Date.parse(ev.ts)||st.lastTs}
   st.last=ev;
   if(ev.role==='user'&&ev.kind==='text'){st.turnStart=st.lastTs;st.turnTokens=0}
@@ -601,7 +667,9 @@ function renderStatus(){
   const el=$('chat-sub');
   if(!st.caughtUp){el.textContent='loading history…';return}
   const pre=st.prefix?st.prefix+' · ':'';
-  if(!st.last||!st.lastTs){el.textContent=pre+'live';return}
+  const nq=[...st.queued.values()].filter(e=>e&&e.st==='pending').length;
+  const qsuf=nq?' · ⏳ '+nq+' queued':'';
+  if(!st.last||!st.lastTs){el.textContent=pre+'live'+qsuf;return}
   const idle=Date.now()-st.lastTs;
   const turn=st.turnStart?fmtDur(Date.now()-st.turnStart):'';
   const tok=st.turnTokens?' · ↓ '+fmtTok(st.turnTokens)+' tokens':'';
@@ -616,23 +684,149 @@ function renderStatus(){
   }else{
     line='✳ working · turn '+(turn||fmtDur(idle))+tok;
   }
-  el.textContent=pre+line;
+  el.textContent=pre+line+qsuf;
 }
+
+/* Minimal, safe markdown: escape first, then only our own tags get in. */
+function md(src){
+  const inline=s=>esc(s)
+    .replace(/`([^`]+)`/g,'<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g,'<b>$1</b>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g,'$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  const parts=String(src).split('```');let html='';
+  for(let i=0;i<parts.length;i++){
+    if(i%2===1){ // fenced code — first line may be a language tag
+      let body=parts[i];const nl=body.indexOf('\n');
+      if(nl>=0&&/^[\w+-]*\s*$/.test(body.slice(0,nl)))body=body.slice(nl+1);
+      html+='<pre><code>'+esc(body.replace(/\n+$/,''))+'</code></pre>';continue;
+    }
+    let out=[],list=null;
+    const flush=()=>{if(list){out.push('<'+list.tag+'>'+list.items.map(x=>'<li>'+x+'</li>').join('')+'</'+list.tag+'>');list=null}};
+    for(const raw of parts[i].split('\n')){
+      const t=raw.trim();let m;
+      if(m=t.match(/^(#{1,4})\s+(.*)/)){flush();out.push('<h'+m[1].length+'>'+inline(m[2])+'</h'+m[1].length+'>')}
+      else if(m=t.match(/^[-*•]\s+(.*)/)){if(!list||list.tag!=='ul'){flush();list={tag:'ul',items:[]}}list.items.push(inline(m[1]))}
+      else if(m=t.match(/^\d+[.)]\s+(.*)/)){if(!list||list.tag!=='ol'){flush();list={tag:'ol',items:[]}}list.items.push(inline(m[1]))}
+      else if(m=t.match(/^>\s?(.*)/)){flush();out.push('<blockquote>'+inline(m[1])+'</blockquote>')}
+      else if(t===''){flush();out.push('')}
+      else{flush();out.push(inline(raw))}
+    }
+    flush();
+    html+=out.join('\n').split(/\n{2,}/).filter(x=>x.trim()).map(x=>
+      /^\s*<(h\d|ul|ol|blockquote|pre)/.test(x)?x:'<p>'+x.trim().replace(/\n/g,'<br>')+'</p>').join('');
+  }
+  return html;
+}
+function firstln(s){s=String(s).trim();const i=s.indexOf('\n');if(i>=0)s=s.slice(0,i);return s.length>90?s.slice(0,90)+'…':s}
 
 function renderEvent(ev){
   const d=document.createElement('div');
-  if(ev.role==='user'||ev.role==='assistant'){
-    if(ev.kind==='thinking'){d.className='think clip';d.textContent=ev.text;
-      d.onclick=()=>d.classList.toggle('clip');return d}
-    d.className='msg '+ev.role;d.textContent=ev.text;return d;
+  if(ev.role==='task'){updateTasks(ev);return null}
+  if(ev.role==='ask'){
+    d.className='cask'+(ev.kind==='answer'?' answer':'');
+    if(ev.kind==='question'){
+      d.innerHTML=(ev.tool?'<div class="qhead">'+esc(ev.tool)+'</div>':'<div class="qhead">question</div>')
+        +esc(ev.text)+(ev.detail?'<div class="qopts">◦ '+esc(ev.detail)+'</div>':'');
+    }else{d.innerHTML='<div class="qhead">answered</div>'+esc(ev.text)}
+    return d;
   }
-  if(ev.role==='tool'){d.className='tool';
-    d.innerHTML='<span class="tname">'+esc(ev.text)+'</span>'+(ev.detail?'<span class="tdet">'+esc(ev.detail)+'</span>':'');
-    return d}
-  if(ev.role==='divider'){d.className='cdiv';d.textContent=esc(ev.detail||ev.text);return d}
+  if(ev.role==='user'||ev.role==='assistant'){
+    if(ev.kind==='thinking'){
+      // Collapsed to one line like the CLI; tap to read it all.
+      d.className='think';
+      d.innerHTML='<span class="tprev">✻ '+esc(firstln(ev.text))+'</span><span class="tbody">'+esc(ev.text)+'</span>';
+      d.onclick=()=>d.classList.toggle('open');
+      return d;
+    }
+    if(ev.kind==='image'){d.className='msg '+ev.role;d.textContent='🖼 image';return d}
+    // Queue lifecycle: an enqueued message renders once with a
+    // "queued" chip that flips on delivery. Delivery can surface as a
+    // mid-turn echo, a normal next-turn prompt, or a slash command —
+    // any later user event with the same text counts and is deduped.
+    if(ev.role==='user'&&ev.detail!=='queued'&&markDelivered(ev.text))return null;
+    d.className='msg '+ev.role;
+    const chip=ev.detail==='queued'?'⏳ queued — waiting for Claude'
+      :ev.detail==='sent mid-turn'?'⏱ sent mid-turn':'';
+    d.innerHTML=md(ev.text)+(chip?'<div class="chip" style="font-size:10px;opacity:.75;margin-top:6px">'+chip+'</div>':'');
+    if(ev.role==='user'&&ev.detail==='queued'&&CHAT_ST){CHAT_ST.queued.set(ev.text,{el:d,st:'pending'});renderStatus()}
+    return d;
+  }
+  if(ev.role==='system'&&ev.kind==='queue-remove'){
+    // The CLI popped it off the queue; the delivered copy will still
+    // echo through the stream right after, so expect one more match.
+    const st=CHAT_ST,e=st&&st.queued.get(ev.text);
+    if(e&&e.st==='pending'){flipChip(e);e.st='removed';renderStatus()}
+    return null;
+  }
+  if(ev.role==='tool'){
+    d.className='tool'+(ev.full?' has-full':'');
+    d.innerHTML='<div class="trow"><span class="tname">'+esc(ev.text)+'</span>'
+      +(ev.detail?'<span class="tdet">'+esc(ev.detail)+'</span>':'')
+      +(ev.full?'<span class="tcaret">▶</span>':'')+'</div>'
+      +(ev.full?'<div class="tfull">'+esc(ev.full)+'</div>':'');
+    if(ev.full)d.querySelector('.trow').onclick=()=>d.classList.toggle('open');
+    return d;
+  }
+  if(ev.role==='system'&&ev.kind==='denied'){d.className='cdenied';d.textContent='⛔ '+ev.text;return d}
+  if(ev.role==='divider'){
+    if(ev.kind==='command'){markDelivered(ev.text);d.className='cdiv command';d.textContent='❯ '+ev.text;return d}
+    if(ev.kind==='interrupt'){d.className='cdiv';d.textContent='⏸ '+ev.text;return d}
+    d.className='cdiv';d.textContent=ev.detail||ev.text;return d;
+  }
   if(ev.role==='system'&&ev.kind==='caught-up'){d.className='cstat';
     d.innerHTML='<span class="pulse"></span>live — watching for new messages';return d}
   return null;
+}
+
+/* Task checklist pinned under the chat header, fed by TaskCreate /
+   TaskUpdate results and TodoWrite snapshots in the stream. */
+function flipChip(e){const c=e.el&&e.el.querySelector('.chip');if(c)c.textContent='⏱ sent mid-turn'}
+/* A queued message's delivery echoes back as a mid-turn reminder, a
+   next-turn prompt, or a slash command. The first echo after queueing
+   is the same message coming around (dedup it); anything after that is
+   the user genuinely repeating themselves (render it). */
+function markDelivered(text){
+  const st=CHAT_ST;if(!st)return false;
+  const e=st.queued.get(text);
+  if(!e)return false;
+  if(e.st==='done'){st.queued.delete(text);return false}
+  flipChip(e);e.st='done';renderStatus();
+  return true;
+}
+
+function updateTasks(ev){
+  const st=CHAT_ST;if(!st)return;
+  if(ev.kind==='snapshot'){
+    // Authoritative on-disk state — other sessions (even on other
+    // seats) update it, so it always replaces transcript-derived data.
+    st.snap=true;st.tasks=new Map();
+    try{JSON.parse(ev.text).forEach(t=>st.tasks.set(t.id,{subject:t.subject,status:t.status}))}catch{}
+  }
+  else if(ev.kind==='todos'){try{st.todos=JSON.parse(ev.text)}catch{}}
+  else if(st.snap)return; // transcript replay can't override the store
+  else if(ev.kind==='task-create')st.tasks.set(ev.tool,{subject:ev.text,status:'pending'});
+  else if(ev.kind==='task-update'){
+    const t=st.tasks.get(ev.tool)||{subject:ev.detail||('task #'+ev.tool),status:'pending'};
+    if(ev.text)t.status=ev.text;
+    if(ev.detail)t.subject=ev.detail;
+    st.tasks.set(ev.tool,t);
+  }
+  if(st.caughtUp||ev.kind==='snapshot')renderTasks();
+}
+function renderTasks(){
+  const st=CHAT_ST,el=$('ctasks');
+  if(!st){el.classList.remove('show');return}
+  let items=[...st.tasks.entries()].map(([id,t])=>({id,...t}));
+  if(!items.length&&!st.snap&&st.todos)items=st.todos.map((t,i)=>({id:''+(i+1),subject:t.content,status:t.status}));
+  if(!items.length){el.classList.remove('show');return}
+  const done=items.filter(t=>t.status==='completed').length;
+  const mark=s=>s==='completed'?'✓':s==='in_progress'?'◐':'○';
+  el.innerHTML='<div class="thead"><span>☑ Tasks</span><span class="prog">'+done+'/'+items.length+' done</span>'
+    +'<span class="prog" style="margin-left:auto">▾</span></div>'
+    +'<div class="tlist">'+items.map(t=>'<div class="titem '+esc(t.status||'pending')+'">'
+      +'<span class="mark">'+mark(t.status)+'</span><span>'+esc(t.subject||'')+'</span></div>').join('')+'</div>';
+  el.classList.add('show');
 }
 
 /* ---------- actions & polling ---------- */

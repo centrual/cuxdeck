@@ -17,11 +17,12 @@ import (
 
 // Event is one item in the chat view.
 type Event struct {
-	Role   string `json:"role"`             // user | assistant | tool | system | divider
-	Kind   string `json:"kind,omitempty"`   // text | thinking | tool | image | model-switch
+	Role   string `json:"role"`             // user | assistant | tool | task | ask | system | divider
+	Kind   string `json:"kind,omitempty"`   // text | thinking | tool | image | model-switch | task-create | task-update | todos | question | answer | denied | interrupt
 	Text   string `json:"text,omitempty"`   // bubble body / one-line tool summary
-	Tool   string `json:"tool,omitempty"`   // tool name, when Kind==tool
-	Detail string `json:"detail,omitempty"` // secondary line (tool target, model names)
+	Tool   string `json:"tool,omitempty"`   // tool name (Kind==tool) or task id (task events)
+	Detail string `json:"detail,omitempty"` // secondary line (tool target, model names, options)
+	Full   string `json:"full,omitempty"`   // expandable body (whole command, task prompt)
 	TS     string `json:"ts,omitempty"`     // when Claude Code recorded the line (RFC3339)
 	Tokens int    `json:"tokens,omitempty"` // output tokens of the assistant message (first event only)
 }
@@ -31,6 +32,8 @@ type rawLine struct {
 	Type      string          `json:"type"`
 	Timestamp string          `json:"timestamp"`
 	Message   json.RawMessage `json:"message"`
+	Operation string          `json:"operation"` // queue-operation lines
+	Content   string          `json:"content"`   // queue-operation payload
 }
 
 type rawMsg struct {
@@ -47,6 +50,7 @@ type block struct {
 	Thinking string          `json:"thinking"`
 	Name     string          `json:"name"`
 	Input    json.RawMessage `json:"input"`
+	Content  json.RawMessage `json:"content"` // tool_result payload
 	From     modelRef        `json:"from"`
 	To       modelRef        `json:"to"`
 }
@@ -63,6 +67,22 @@ func Parse(line []byte) []Event {
 	if json.Unmarshal(line, &r) != nil {
 		return nil
 	}
+	// A message typed while Claude is busy is journaled as a queue
+	// operation: enqueue when typed, remove when delivered. Rendering
+	// both lets the panel show the pending state the CLI shows.
+	if r.Type == "queue-operation" {
+		text := strings.TrimSpace(r.Content)
+		if text == "" {
+			return nil
+		}
+		switch r.Operation {
+		case "enqueue":
+			return []Event{{Role: "user", Kind: "text", Text: text, Detail: "queued", TS: r.Timestamp}}
+		case "remove", "dequeue":
+			return []Event{{Role: "system", Kind: "queue-remove", Text: text, TS: r.Timestamp}}
+		}
+		return nil
+	}
 	if r.Type != "user" && r.Type != "assistant" {
 		return nil
 	}
@@ -75,14 +95,11 @@ func Parse(line []byte) []Event {
 	// Content may be a bare string (early user prompts) or a block list.
 	var asString string
 	if json.Unmarshal(m.Content, &asString) == nil {
-		if role == "user" && isSystemWrapper(asString) {
-			return nil
+		out := textEvents(role, asString)
+		for i := range out {
+			out[i].TS = r.Timestamp
 		}
-		body := strings.TrimSpace(asString)
-		if body == "" {
-			return nil
-		}
-		return []Event{{Role: role, Kind: "text", Text: body, TS: r.Timestamp}}
+		return out
 	}
 
 	var blocks []block
@@ -93,19 +110,15 @@ func Parse(line []byte) []Event {
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
-			if role == "user" && isSystemWrapper(b.Text) {
-				continue // block-form user content carries injections too
-			}
-			if t := strings.TrimSpace(b.Text); t != "" {
-				out = append(out, Event{Role: role, Kind: "text", Text: t})
-			}
+			out = append(out, textEvents(role, b.Text)...)
 		case "thinking":
 			if t := strings.TrimSpace(b.Thinking); t != "" {
 				out = append(out, Event{Role: "assistant", Kind: "thinking", Text: t})
 			}
 		case "tool_use":
-			summary, detail := toolSummary(b.Name, b.Input)
-			out = append(out, Event{Role: "tool", Kind: "tool", Tool: b.Name, Text: summary, Detail: detail})
+			out = append(out, toolEvents(b.Name, b.Input)...)
+		case "tool_result":
+			out = append(out, resultEvents(b.Content)...)
 		case "image":
 			out = append(out, Event{Role: role, Kind: "image", Text: "🖼 image"})
 		case "fallback":
@@ -114,9 +127,6 @@ func Parse(line []byte) []Event {
 					Text: "model switched", Detail: prettyModel(b.From.Model) + " → " + prettyModel(b.To.Model)})
 			}
 		}
-		// tool_result blocks are the tool's output echoed back to the
-		// model; the tool line already stands for that exchange, so we
-		// drop them from the chat view.
 	}
 	for i := range out {
 		out[i].TS = r.Timestamp
@@ -127,6 +137,229 @@ func Parse(line []byte) []Event {
 		out[0].Tokens = m.Usage.OutputTokens
 	}
 	return out
+}
+
+// textEvents renders one text body. For assistant text that's just a
+// bubble; user text is where Claude Code hides its machinery, so this
+// recovers what a human actually did — mid-turn messages, slash
+// commands, interrupts — and drops the rest of the wrapping.
+func textEvents(role, s string) []Event {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return nil
+	}
+	if role != "user" {
+		return []Event{{Role: role, Kind: "text", Text: t}}
+	}
+	if strings.HasPrefix(t, "[Request interrupted") {
+		return []Event{{Role: "divider", Kind: "interrupt", Text: "interrupted by user"}}
+	}
+	// A message typed while Claude was working arrives wrapped in a
+	// system-reminder; surface it as the user bubble it really is.
+	if strings.Contains(t, midTurnMarker) {
+		if ev, ok := midTurnEvent(t); ok {
+			return []Event{ev}
+		}
+		return nil
+	}
+	// Slash commands show up as caveat-wrapped XML; render the bar the
+	// CLI shows ("> /model") instead of hiding the action entirely.
+	if name := xmlField(t, "command-name"); name != "" {
+		args := xmlField(t, "command-args")
+		if args != "" {
+			name += " " + args
+		}
+		return []Event{{Role: "divider", Kind: "command", Text: name}}
+	}
+	if isSystemWrapper(t) {
+		return nil
+	}
+	return []Event{{Role: "user", Kind: "text", Text: t}}
+}
+
+// xmlField pulls <tag>value</tag> out of a wrapper blob, "" if absent.
+func xmlField(s, tag string) string {
+	open, close := "<"+tag+">", "</"+tag+">"
+	i := strings.Index(s, open)
+	if i < 0 {
+		return ""
+	}
+	rest := s[i+len(open):]
+	j := strings.Index(rest, close)
+	if j < 0 {
+		return ""
+	}
+	return strings.TrimSpace(rest[:j])
+}
+
+// toolEvents renders a tool_use block. Task-list and question tools get
+// structured events so the panel can show live checklists and question
+// cards; everything else becomes a one-line tool call with an optional
+// expandable body.
+func toolEvents(name string, input json.RawMessage) []Event {
+	switch name {
+	case "TaskCreate":
+		// The canonical create event comes from the tool result, which
+		// carries the assigned id; emitting here too would duplicate.
+		return nil
+	case "TaskUpdate":
+		var in struct {
+			TaskID  string `json:"taskId"`
+			Status  string `json:"status"`
+			Subject string `json:"subject"`
+		}
+		if json.Unmarshal(input, &in) != nil || in.TaskID == "" {
+			return nil
+		}
+		return []Event{{Role: "task", Kind: "task-update", Tool: in.TaskID, Text: in.Status, Detail: in.Subject}}
+	case "TodoWrite":
+		var in struct {
+			Todos []struct {
+				Content string `json:"content"`
+				Status  string `json:"status"`
+			} `json:"todos"`
+		}
+		if json.Unmarshal(input, &in) != nil || len(in.Todos) == 0 {
+			return nil
+		}
+		b, _ := json.Marshal(in.Todos)
+		return []Event{{Role: "task", Kind: "todos", Text: string(b)}}
+	case "AskUserQuestion":
+		var in struct {
+			Questions []struct {
+				Question string `json:"question"`
+				Header   string `json:"header"`
+				Options  []struct {
+					Label string `json:"label"`
+				} `json:"options"`
+			} `json:"questions"`
+		}
+		if json.Unmarshal(input, &in) != nil {
+			return nil
+		}
+		var out []Event
+		for _, q := range in.Questions {
+			var labels []string
+			for _, o := range q.Options {
+				labels = append(labels, o.Label)
+			}
+			out = append(out, Event{Role: "ask", Kind: "question", Text: q.Question,
+				Tool: q.Header, Detail: strings.Join(labels, " · ")})
+		}
+		return out
+	}
+	summary, detail, full := toolSummary(name, input)
+	return []Event{{Role: "tool", Kind: "tool", Tool: name, Text: summary, Detail: detail, Full: full}}
+}
+
+const midTurnMarker = "The user sent a new message while you were working:"
+
+// midTurnEvent extracts the human message from a mid-turn wrapper —
+// found either as its own user turn or appended to a tool result.
+func midTurnEvent(t string) (Event, bool) {
+	i := strings.Index(t, midTurnMarker)
+	if i < 0 {
+		return Event{}, false
+	}
+	msg := t[i+len(midTurnMarker):]
+	if j := strings.Index(msg, "This is how Claude Code surfaces"); j >= 0 {
+		msg = msg[:j]
+	}
+	if j := strings.Index(msg, "</system-reminder>"); j >= 0 {
+		msg = msg[:j]
+	}
+	if msg = strings.TrimSpace(msg); msg != "" {
+		return Event{Role: "user", Kind: "text", Text: msg, Detail: "sent mid-turn"}, true
+	}
+	return Event{}, false
+}
+
+// resultEvents inspects a tool_result payload for the few outcomes worth
+// showing: task creation (the id lives only here), answered questions,
+// permission denials, and mid-turn user messages appended to a result.
+// Ordinary outputs stay hidden — the tool line already stands for the
+// exchange.
+func resultEvents(content json.RawMessage) []Event {
+	t := resultText(content)
+	var out []Event
+	if ev, ok := midTurnEvent(t); ok {
+		out = append(out, ev)
+	}
+	switch {
+	case strings.HasPrefix(t, "Task #") && strings.Contains(t, " created successfully: "):
+		rest := t[len("Task #"):]
+		i := strings.Index(rest, " created successfully: ")
+		id, subject := rest[:i], strings.TrimSpace(rest[i+len(" created successfully: "):])
+		if j := strings.IndexByte(subject, '\n'); j >= 0 {
+			subject = subject[:j]
+		}
+		out = append(out, Event{Role: "task", Kind: "task-create", Tool: id, Text: subject})
+	case strings.HasPrefix(t, "Your questions have been answered:"):
+		out = append(out, Event{Role: "ask", Kind: "answer", Text: askAnswers(t)})
+	case strings.Contains(t, "doesn't want to proceed with this tool use"):
+		out = append(out, Event{Role: "system", Kind: "denied", Text: "user declined this action"})
+	}
+	return out
+}
+
+// resultText flattens a tool_result content payload (bare string or a
+// list of text blocks) to plain text.
+func resultText(content json.RawMessage) string {
+	var s string
+	if json.Unmarshal(content, &s) == nil {
+		return s
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(content, &blocks) != nil {
+		return ""
+	}
+	var sb strings.Builder
+	for _, b := range blocks {
+		if b.Type == "text" {
+			sb.WriteString(b.Text)
+			sb.WriteByte('\n')
+		}
+	}
+	return sb.String()
+}
+
+// askAnswers extracts the chosen answers from an AskUserQuestion result
+// ('"question"="answer". ...' pairs), falling back to the raw text.
+func askAnswers(t string) string {
+	var answers []string
+	rest := t
+	for {
+		i := strings.Index(rest, `="`)
+		if i < 0 {
+			break
+		}
+		rest = rest[i+2:]
+		j := strings.IndexByte(rest, '"')
+		if j < 0 {
+			break
+		}
+		answers = append(answers, rest[:j])
+		rest = rest[j+1:]
+	}
+	if len(answers) == 0 {
+		return firstLineOf(strings.TrimPrefix(t, "Your questions have been answered:"), 160)
+	}
+	return strings.Join(answers, " · ")
+}
+
+func firstLineOf(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	r := []rune(s)
+	if len(r) > max {
+		return string(r[:max]) + "…"
+	}
+	return s
 }
 
 // isSystemWrapper spots the machinery Claude Code injects as "user"
@@ -151,8 +384,10 @@ func isSystemWrapper(s string) bool {
 }
 
 // toolSummary renders a tool call as one readable line plus an optional
-// detail, pulling the meaningful argument per tool.
-func toolSummary(name string, input json.RawMessage) (string, string) {
+// detail, pulling the meaningful argument per tool. full, when set, is
+// the expandable body behind the one-liner (the whole command, the
+// subagent prompt) so the panel can show what the CLI shows.
+func toolSummary(name string, input json.RawMessage) (summary, detail, full string) {
 	var m map[string]any
 	_ = json.Unmarshal(input, &m)
 	str := func(k string) string {
@@ -164,19 +399,33 @@ func toolSummary(name string, input json.RawMessage) (string, string) {
 	short := prettyTool(name)
 	switch {
 	case name == "Bash":
-		return short, oneLine(str("command"), 120)
+		cmd := str("command")
+		return short, oneLine(cmd, 120), clip(cmd, 2000)
 	case name == "Edit" || name == "Write" || name == "Read" || name == "NotebookEdit":
-		return short, baseName(str("file_path"))
+		return short, baseName(str("file_path")), str("file_path")
 	case name == "Grep":
-		return short, str("pattern")
+		return short, str("pattern"), ""
 	case name == "Glob":
-		return short, str("pattern")
+		return short, str("pattern"), ""
 	case strings.HasPrefix(name, "mcp__"):
-		return short, ""
-	case name == "Task":
-		return short, str("description")
+		b, _ := json.Marshal(m)
+		return short, "", clip(string(b), 600)
+	case name == "Task" || name == "Agent":
+		return short, str("description"), clip(str("prompt"), 800)
+	case name == "Skill":
+		return short, str("skill"), ""
 	}
-	return short, ""
+	return short, "", ""
+}
+
+// clip bounds an expandable body without losing its shape.
+func clip(s string, max int) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) > max {
+		return string(r[:max]) + "\n…"
+	}
+	return s
 }
 
 func prettyTool(name string) string {
@@ -186,7 +435,8 @@ func prettyTool(name string) string {
 	}
 	icon := map[string]string{
 		"Bash": "⚡", "Edit": "✎", "Write": "✎", "Read": "📖",
-		"Grep": "🔎", "Glob": "🔎", "Task": "🤖", "TodoWrite": "☑",
+		"Grep": "🔎", "Glob": "🔎", "Task": "🤖", "Agent": "🤖",
+		"Skill": "✦", "WebFetch": "🌐", "WebSearch": "🌐", "TodoWrite": "☑",
 	}[name]
 	if icon == "" {
 		icon = "•"

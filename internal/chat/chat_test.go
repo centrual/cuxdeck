@@ -71,3 +71,69 @@ func TestGarbageAndNonChatSkipped(t *testing.T) {
 		}
 	}
 }
+
+func TestMidTurnMessageSurfaced(t *testing.T) {
+	line := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"File created.\n\n<system-reminder>\nThe user sent a new message while you were working:\nhemen dur\n\nThis is how Claude Code surfaces messages...\n</system-reminder>"}]}}`
+	evs := Parse([]byte(line))
+	if len(evs) != 1 || evs[0].Role != "user" || evs[0].Text != "hemen dur" || evs[0].Detail != "sent mid-turn" {
+		t.Fatalf("got %+v", evs)
+	}
+}
+
+func TestTaskCreateFromResult(t *testing.T) {
+	line := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Task #3 created successfully: Deploy the app"}]}}`
+	evs := Parse([]byte(line))
+	if len(evs) != 1 || evs[0].Role != "task" || evs[0].Kind != "task-create" || evs[0].Tool != "3" || evs[0].Text != "Deploy the app" {
+		t.Fatalf("got %+v", evs)
+	}
+}
+
+func TestTaskUpdateFromToolUse(t *testing.T) {
+	line := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"TaskUpdate","input":{"taskId":"3","status":"completed"}}]}}`
+	evs := Parse([]byte(line))
+	if len(evs) != 1 || evs[0].Kind != "task-update" || evs[0].Tool != "3" || evs[0].Text != "completed" {
+		t.Fatalf("got %+v", evs)
+	}
+}
+
+func TestAskQuestionAndAnswer(t *testing.T) {
+	q := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"AskUserQuestion","input":{"questions":[{"question":"Which db?","header":"DB","options":[{"label":"Postgres"},{"label":"SQLite"}]}]}}]}}`
+	evs := Parse([]byte(q))
+	if len(evs) != 1 || evs[0].Role != "ask" || evs[0].Kind != "question" || evs[0].Detail != "Postgres · SQLite" {
+		t.Fatalf("question: got %+v", evs)
+	}
+	a := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Your questions have been answered: \"Which db?\"=\"Postgres\". You can now continue."}]}}`
+	evs = Parse([]byte(a))
+	if len(evs) != 1 || evs[0].Kind != "answer" || evs[0].Text != "Postgres" {
+		t.Fatalf("answer: got %+v", evs)
+	}
+}
+
+func TestDeniedAndInterrupt(t *testing.T) {
+	d := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"The user doesn't want to proceed with this tool use. The tool use was rejected."}]}}`
+	evs := Parse([]byte(d))
+	if len(evs) != 1 || evs[0].Kind != "denied" {
+		t.Fatalf("denied: got %+v", evs)
+	}
+	i := `{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}`
+	evs = Parse([]byte(i))
+	if len(evs) != 1 || evs[0].Kind != "interrupt" {
+		t.Fatalf("interrupt: got %+v", evs)
+	}
+}
+
+func TestSlashCommandDivider(t *testing.T) {
+	c := `{"type":"user","message":{"role":"user","content":"<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args>opus</command-args>"}}`
+	evs := Parse([]byte(c))
+	if len(evs) != 1 || evs[0].Kind != "command" || evs[0].Text != "/model opus" {
+		t.Fatalf("got %+v", evs)
+	}
+}
+
+func TestBashFullBody(t *testing.T) {
+	line := `{"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","name":"Bash","input":{"command":"echo a\necho b"}}]}}`
+	evs := Parse([]byte(line))
+	if len(evs) != 1 || evs[0].Full != "echo a\necho b" {
+		t.Fatalf("got %+v", evs)
+	}
+}

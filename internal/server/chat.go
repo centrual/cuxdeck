@@ -28,7 +28,7 @@ func (s *Server) chatStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"no transcript for that session yet"}`, http.StatusNotFound)
 		return
 	}
-	streamTranscript(w, r, path)
+	streamTranscript(w, r, path, strings.TrimSuffix(filepath.Base(path), ".jsonl"))
 }
 
 // conversations lists recent transcripts across all projects, discovered
@@ -51,7 +51,7 @@ func (s *Server) conversationChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"no such conversation"}`, http.StatusNotFound)
 		return
 	}
-	streamTranscript(w, r, path)
+	streamTranscript(w, r, path, id)
 }
 
 // validConvID keeps the id strictly to session-uuid characters so it can
@@ -69,9 +69,27 @@ func validConvID(id string) bool {
 	return true
 }
 
+// taskSnapshot serializes the authoritative on-disk task state for a
+// conversation into one chat event, or returns a zero Event when the
+// store was never created. Sent whole each time so the client can just
+// replace its list — including replacing it with empty when every task
+// has been cleaned up, possibly by a different account's session.
+func taskSnapshot(convID string) (chat.Event, bool) {
+	tasks, ok := cuxdata.LoadTasks(convID)
+	if !ok {
+		return chat.Event{}, false
+	}
+	if tasks == nil {
+		tasks = []cuxdata.Task{}
+	}
+	b, _ := json.Marshal(tasks)
+	return chat.Event{Role: "task", Kind: "snapshot", Text: string(b)}, true
+}
+
 // streamTranscript is the shared SSE body: full backlog, a caught-up
-// marker, then a 700ms tail while the client stays connected.
-func streamTranscript(w http.ResponseWriter, r *http.Request, path string) {
+// marker, then a 700ms tail while the client stays connected. convID
+// keys the on-disk task store; snapshots of it ride the same stream.
+func streamTranscript(w http.ResponseWriter, r *http.Request, path, convID string) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
@@ -119,6 +137,13 @@ func streamTranscript(w http.ResponseWriter, r *http.Request, path string) {
 	}
 
 	emitPending() // backlog
+	// Authoritative task state arrives after the backlog so it always
+	// wins over anything reconstructed from old transcript lines.
+	var lastSnap string
+	if ev, ok := taskSnapshot(convID); ok {
+		send(ev)
+		lastSnap = ev.Text
+	}
 	fl.Flush()
 	send(chat.Event{Role: "system", Kind: "caught-up"})
 	fl.Flush()
@@ -127,6 +152,8 @@ func streamTranscript(w http.ResponseWriter, r *http.Request, path string) {
 	// closing the tab cancels ctx and ends the goroutine.
 	ticker := time.NewTicker(700 * time.Millisecond)
 	defer ticker.Stop()
+	taskTicker := time.NewTicker(2 * time.Second)
+	defer taskTicker.Stop()
 	keepalive := time.NewTicker(20 * time.Second)
 	defer keepalive.Stop()
 	for {
@@ -136,6 +163,14 @@ func streamTranscript(w http.ResponseWriter, r *http.Request, path string) {
 		case <-ticker.C:
 			emitPending()
 			fl.Flush()
+		case <-taskTicker.C:
+			// Another session — possibly on another seat — may move the
+			// task list; re-send only when it actually changed.
+			if ev, ok := taskSnapshot(convID); ok && ev.Text != lastSnap {
+				send(ev)
+				lastSnap = ev.Text
+				fl.Flush()
+			}
 		case <-keepalive.C:
 			fmt.Fprint(w, ": ping\n\n") // comment frame keeps proxies from closing
 			fl.Flush()
