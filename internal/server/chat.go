@@ -28,7 +28,50 @@ func (s *Server) chatStream(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"no transcript for that session yet"}`, http.StatusNotFound)
 		return
 	}
+	streamTranscript(w, r, path)
+}
 
+// conversations lists recent transcripts across all projects, discovered
+// straight from disk — visible even when a session was started outside
+// cux and so never touched the registry.
+func (s *Server) conversations(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(cuxdata.LoadConversations(15))
+}
+
+// conversationChat streams one conversation by transcript id.
+func (s *Server) conversationChat(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !validConvID(id) {
+		http.Error(w, `{"error":"bad conversation id"}`, http.StatusBadRequest)
+		return
+	}
+	path := cuxdata.FindTranscript(id)
+	if path == "" {
+		http.Error(w, `{"error":"no such conversation"}`, http.StatusNotFound)
+		return
+	}
+	streamTranscript(w, r, path)
+}
+
+// validConvID keeps the id strictly to session-uuid characters so it can
+// never traverse outside the projects directory.
+func validConvID(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		ok := c == '-' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// streamTranscript is the shared SSE body: full backlog, a caught-up
+// marker, then a 700ms tail while the client stays connected.
+func streamTranscript(w http.ResponseWriter, r *http.Request, path string) {
 	fl, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)

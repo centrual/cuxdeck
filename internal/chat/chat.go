@@ -22,17 +22,23 @@ type Event struct {
 	Text   string `json:"text,omitempty"`   // bubble body / one-line tool summary
 	Tool   string `json:"tool,omitempty"`   // tool name, when Kind==tool
 	Detail string `json:"detail,omitempty"` // secondary line (tool target, model names)
+	TS     string `json:"ts,omitempty"`     // when Claude Code recorded the line (RFC3339)
+	Tokens int    `json:"tokens,omitempty"` // output tokens of the assistant message (first event only)
 }
 
 // rawLine is the slice of a transcript entry we read.
 type rawLine struct {
-	Type    string          `json:"type"`
-	Message json.RawMessage `json:"message"`
+	Type      string          `json:"type"`
+	Timestamp string          `json:"timestamp"`
+	Message   json.RawMessage `json:"message"`
 }
 
 type rawMsg struct {
 	Role    string          `json:"role"`
 	Content json.RawMessage `json:"content"`
+	Usage   struct {
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
 }
 
 type block struct {
@@ -76,7 +82,7 @@ func Parse(line []byte) []Event {
 		if body == "" {
 			return nil
 		}
-		return []Event{{Role: role, Kind: "text", Text: body}}
+		return []Event{{Role: role, Kind: "text", Text: body, TS: r.Timestamp}}
 	}
 
 	var blocks []block
@@ -87,6 +93,9 @@ func Parse(line []byte) []Event {
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
+			if role == "user" && isSystemWrapper(b.Text) {
+				continue // block-form user content carries injections too
+			}
 			if t := strings.TrimSpace(b.Text); t != "" {
 				out = append(out, Event{Role: role, Kind: "text", Text: t})
 			}
@@ -108,6 +117,14 @@ func Parse(line []byte) []Event {
 		// tool_result blocks are the tool's output echoed back to the
 		// model; the tool line already stands for that exchange, so we
 		// drop them from the chat view.
+	}
+	for i := range out {
+		out[i].TS = r.Timestamp
+	}
+	// Usage belongs to the whole assistant message; stamp it on the
+	// first event only so a client summing tokens never double-counts.
+	if len(out) > 0 && role == "assistant" && m.Usage.OutputTokens > 0 {
+		out[0].Tokens = m.Usage.OutputTokens
 	}
 	return out
 }

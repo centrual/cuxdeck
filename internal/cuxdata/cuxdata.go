@@ -114,9 +114,17 @@ func LoadSessions() []Session {
 			continue
 		}
 		var s Session
-		if json.Unmarshal(b, &s) == nil && s.PID != 0 {
-			out = append(out, s)
+		if json.Unmarshal(b, &s) != nil || s.PID == 0 {
+			continue
 		}
+		// A wrapper that dies hard (SIGKILL, closed terminal) never gets
+		// to remove its own file, so reap entries whose PID is gone —
+		// otherwise ghosts of long-dead sessions pile up in the panel.
+		if !pidAlive(s.PID) {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+			continue
+		}
+		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt.Before(out[j].StartedAt) })
 	return out
