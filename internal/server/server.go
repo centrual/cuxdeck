@@ -17,7 +17,9 @@ import (
 	"github.com/centrual/cuxdeck/internal/cuxdata"
 )
 
-//go:embed web/index.html
+//go:generate go run ../../tools/buildweb
+
+//go:embed web
 var webFS embed.FS
 
 // Server wires the pieces together.
@@ -48,18 +50,35 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy", "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'")
+		h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'")
 		next.ServeHTTP(w, r)
 	})
 }
 
+// panel serves the React app shell and its two static assets. Anything
+// else under / is a 404 — the app is exactly index.html + app.js +
+// style.css + the mascot, all embedded in the binary.
 func (s *Server) panel(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	ctype := map[string]string{
+		"/":          "text/html; charset=utf-8",
+		"/app.js":    "text/javascript; charset=utf-8",
+		"/style.css": "text/css; charset=utf-8",
+		"/onion.svg": "image/svg+xml",
+	}[r.URL.Path]
+	if ctype == "" {
 		http.NotFound(w, r)
 		return
 	}
-	b, _ := webFS.ReadFile("web/index.html")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	name := r.URL.Path
+	if name == "/" {
+		name = "/index.html"
+	}
+	b, err := webFS.ReadFile("web" + name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", ctype)
 	_, _ = w.Write(b)
 }
 

@@ -168,6 +168,20 @@ party who can see your data. If a step can be removed, it will be.
 - macOS or Linux today · Windows on the roadmap
 - A browser on the device you want to watch from. That's the whole list.
 
+## Development
+
+The panel is **React + TypeScript**, bundled by **esbuild used as a Go
+library** — the entire toolchain is Go, and React is vendored under
+`web/vendor`, so there is no node/npm anywhere in the loop:
+
+```sh
+go run ./tools/buildweb   # web/src/*.tsx → internal/server/web/app.js
+go build ./cmd/cuxdeck    # single binary, panel embedded
+```
+
+The generated bundle is committed, so a plain `go build` always works
+without the generate step.
+
 ## License
 
 GPL-3.0-only — the same license as [cux](https://github.com/inulute/cux).
