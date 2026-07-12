@@ -1,94 +1,177 @@
-# cuxdeck
+<div align="center">
 
-**Watch and manage your [cux](https://github.com/inulute/cux) sessions from your phone.**
+# ⌁ cuxdeck
 
-cux runs multiple Claude Code accounts as one and keeps overnight runs alive
-across rate limits. cuxdeck is its control deck: a background app on the
-machine that serves a mobile-friendly panel — sessions, seats, projects —
-reachable from anywhere, secured by device pairing, with zero accounts and
-zero configuration.
+### Mission control for your overnight AI coding fleet — in your pocket.
 
-> Status: early development. The design below is the contract we are building
-> toward; expect rough edges until v1 ships.
+*Every Claude Code session on every machine you own — watched, steered,
+from any browser on Earth. No accounts. No app store. No servers of ours
+in the middle. You install it, and it just works.*
 
-## The experience we are building
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Status](https://img.shields.io/badge/status-building%20v1-orange.svg)](#roadmap)
+[![Companion to cux](https://img.shields.io/badge/companion%20to-cux-8A2BE2.svg)](https://github.com/inulute/cux)
 
-1. Install cuxdeck (dmg / brew / one-line installer).
-2. Open it once — an icon appears in your menu bar, and it starts with your
-   computer from then on.
-3. Click **Pair a phone** → a QR code fills the screen.
-4. Scan it. Your phone now shows the live panel: every running cux session
-   (which directory, which seat, running / waiting-for-reset / retrying),
-   every seat's usage bars, every project. Switch seats, manage projects,
-   check overnight runs from bed.
+</div>
 
-No sign-ups. No tokens to copy. No VPN app on the phone. If a step can be
-removed, it will be.
+---
+
+It's **3:47 AM**. Your agent has been refactoring for six hours straight.
+It burned through one account's limit, hopped to the next seat without
+dropping the conversation, rode out an API outage with patient retries,
+and kept going.
+
+You know all this because your phone buzzed once — and because, half-asleep,
+you opened a link and *watched it happen*:
+
+```
+╭──────────────────────────────────────╮
+│  ⌁ cuxdeck                    ● live  │
+│                                       │
+│  ▸ mac-studio            2 sessions   │
+│    ~/code/client-api                  │
+│      seat ogz · running · 6h 12m      │
+│      ▓▓▓▓▓▓▓░░░  2.6M tok             │
+│    ~/code/side-project                │
+│      waiting-reset · ogz in 02:40 ◔   │
+│                                       │
+│  ▸ linux-box             1 session    │
+│    ~/ml/train-pipeline                │
+│      seat work · running · 41m        │
+│                                       │
+│  ▸ gpu-rig               idle         │
+│                                       │
+│  SEATS (across fleet)                 │
+│    ogz    5h ▓▓▓▓▓▓▓░░░  68%          │
+│    ozcan  5h ▓▓░░░░░░░░  19%          │
+│    work   7d ▓▓▓▓▓░░░░░  51%          │
+│                                       │
+│  [ switch seat ]   [ pause ]          │
+╰──────────────────────────────────────╯
+```
+
+Then you put the phone down and went back to sleep. The fleet kept working.
+
+**This is cuxdeck.**
+
+---
+
+## Why this exists
+
+[cux](https://github.com/inulute/cux) already turns a pile of Claude accounts
+into one tireless pool — it swaps seats at the limit, waits out resets, and
+resumes through outages so your agent runs all night. But once you close the
+laptop lid, it all happens **in the dark**. Is it alive? Which seat is it on?
+Did everything stall at 4 AM waiting for a human who was asleep?
+
+And the moment you run agents on *more than one machine* — a Mac at your desk,
+a Linux box in the closet, a GPU rig in the other room — there is no single
+place that shows you the whole picture. You SSH into three hosts to answer one
+question: *how is my fleet doing?*
+
+Claude Code has a remote feature, but it's tied to the account you logged in
+with — and cux's whole job is to keep changing that account. The moment a swap
+happens, the session vanishes from your phone.
+
+cuxdeck closes the gap. It is the one screen that answers *"how is everything,
+everywhere?"* — and lets you do something about it — from the device that's
+already in your hand.
+
+## What it feels like to use
+
+1. **Install** cuxdeck on each machine (dmg · Homebrew · one-line installer).
+2. **Open it once.** An icon lands in your menu bar; it starts with the
+   computer from then on. Nothing to configure.
+3. **Tap “Pair a phone.”** A QR code fills the screen.
+4. **Scan it.** That machine is now on your phone — live sessions, seat usage,
+   projects. Scan the next machine's QR and it joins the same fleet view.
+
+No sign-ups. No tokens to copy by hand. No VPN client on the phone. No third
+party who can see your data. If a step can be removed, it will be.
 
 ## How it works
 
 ```
-phone browser ──HTTPS──► trycloudflare.com ──tunnel──► cuxdeck (127.0.0.1)
-                                                        │  reads ~/.cux
-                                                        │  (state, usage,
-                                                        │   session registry)
-                                                        └─ executes `cux` CLI
-                                                           for every action
+                         your phone (one panel, your whole fleet)
+                          │            │            │
+              ┌───────────┘            │            └───────────┐
+              ▼                        ▼                        ▼
+     trycloudflare.com        trycloudflare.com        trycloudflare.com
+       (tunnel, TLS)            (tunnel, TLS)            (tunnel, TLS)
+              ▼                        ▼                        ▼
+      cuxdeck @ mac            cuxdeck @ linux          cuxdeck @ gpu-rig
+      127.0.0.1                127.0.0.1                127.0.0.1
+       reads ~/.cux             reads ~/.cux             reads ~/.cux
+       runs `cux`               runs `cux`               runs `cux`
 ```
 
-- **Server**: a single Go binary bound to `127.0.0.1`. It reads cux's on-disk
-  state (accounts, usage cache, project pools, and the per-wrapper session
-  heartbeat registry) and shells out to the `cux` CLI for mutations, so all
-  business rules stay in cux.
-- **Remote access**: cuxdeck downloads and supervises `cloudflared`
-  (checksum-verified, stored under `~/.cuxdeck/bin`) and opens an accountless
-  [Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/).
-  If the tunnel drops, cuxdeck re-establishes it and notifies your phone of
+- **Server** — one small Go binary bound to `127.0.0.1`. It reads cux's
+  on-disk state (accounts, usage cache, project pools, the per-session
+  heartbeat registry) and shells out to the `cux` CLI for every action, so
+  all the rules stay in cux. It never opens a listening port to the world.
+- **Remote access, accountless** — cuxdeck downloads and supervises
+  `cloudflared` (checksum-verified, kept under `~/.cuxdeck/bin`) and opens a
+  [Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/):
+  a random `https://….trycloudflare.com` address, **no Cloudflare account
+  required**. If the tunnel drops, cuxdeck rebuilds it and pushes your phone
   the new address.
-- **Pairing & auth**: the QR encodes the current URL plus a long random
-  per-device token. The URL is never the secret — every request is
-  authenticated, failed attempts back off exponentially, and devices can be
-  revoked from the panel. A short manual pairing code exists for cameraless
-  setups.
-- **Notifications (Web Push, no third parties)**: push subscriptions live
-  with your browser's push service, not with our URL — so even when the
-  tunnel address rotates, the old service worker still receives the "panel
-  moved, tap to open" push and the chain continues. Planned events: tunnel
-  address changed · all seats exhausted (with the reset countdown) ·
-  wait-for-reset resumed · API-outage retry started/recovered · run finished
-  (duration + tokens) · a seat needs re-login. Per-event toggles in the panel.
-- **Telegram (optional, first-class)**: a guided connect flow — create a bot
-  via BotFather with one tap, paste the token, send `/start`; cuxdeck catches
-  the chat id and sends a test message. Same events, delivered to a channel
-  that survives phone/browser changes. Never required.
+- **The fleet is assembled in your browser, not on a server** — each machine
+  is one independent deck with its own tunnel and its own device token. Your
+  phone holds the list and merges them into one view. There is no central
+  cuxdeck service to sign up for, trust, or take down — add a machine by
+  scanning its QR, remove it by forgetting it.
+- **Pairing & auth** — the QR encodes the deck's current URL plus a long
+  random per-device token. The URL is never the secret: every request is
+  authenticated, failed attempts back off, and any device can be revoked from
+  the panel. A short manual code covers cameraless setups.
+- **Notifications (Web Push, no third parties)** — subscriptions live with
+  your browser's push service, not with our URL, so even when a tunnel address
+  rotates the old service worker still receives the *"panel moved — tap to
+  open"* push and the chain never breaks. Planned events: tunnel address
+  changed · all seats exhausted (with the reset countdown) · wait-for-reset
+  resumed · API-outage retry started / recovered · run finished (duration +
+  tokens) · a seat needs re-login. Per-event toggles per machine.
+- **Telegram (optional, first-class)** — a guided flow if you want alerts in a
+  channel that outlives any phone: open BotFather with one tap, paste the
+  token, send `/start`; cuxdeck catches the chat id and sends a test message.
+  Same events. Never required.
 
-## Design principles
+## Principles we won't compromise
 
-- **Zero-step by default.** Anything that asks the user for an account, a
-  token, or a config file must justify itself or die. Mandatory security
-  (device pairing) is the only exception.
-- **cux owns the rules.** cuxdeck is a window and a remote control; every
-  mutation goes through the `cux` CLI, every read through cux's documented
-  on-disk files.
-- **No cuxdeck servers.** Your data flows through an encrypted tunnel you
-  spawn; we never see it, relay it, or store it. Nothing to trust but the
-  code in this repo.
-- **A browser is the only client.** Phones, tablets, another laptop — if it
-  renders HTML, it is a cuxdeck client. PWA install for a home-screen icon.
+- **Zero-step by default.** Anything that asks for an account, a token, or a
+  config file has to earn its place — or it's cut. Device pairing is the one
+  mandatory step, because security isn't optional.
+- **We run no servers.** Your data flows through a tunnel *your machine*
+  spawns, straight to *your phone*. We never see it, relay it, or store it.
+  There is nothing to trust here but the code in this repo.
+- **cux owns the rules.** cuxdeck is a window and a remote control. Every
+  change goes through the `cux` CLI; every reading comes from cux's on-disk
+  files. No logic forks, no drift.
+- **A browser is the only client.** Phone, tablet, someone else's laptop — if
+  it renders HTML, it's a cuxdeck client. Add it to your home screen and it
+  looks and launches like a native app, with none of the app-store friction.
 
 ## Roadmap
 
 | Phase | Scope |
 |---|---|
-| v1 | daemon + mobile panel (sessions / seats / projects, view + manage) · QR device pairing · tunnel supervisor · `cuxdeck install` (start at login) · menu bar icon |
-| v2 | Web Push event notifications · Telegram connect wizard |
-| v3 | usage/stat charts, multi-machine decks |
+| **v1** | daemon + mobile panel (sessions · seats · projects, view & manage) · QR device pairing · accountless tunnel supervisor · start-at-login · menu-bar icon |
+| **v2** | multi-machine fleet view (one phone, many decks) · Web Push events · Telegram connect wizard |
+| **v3** | usage & cost charts over time · shared team decks |
+
+> **Status: early development.** The experience above is the contract we're
+> building toward, not a shipped fact yet. Watch the repo — it's moving fast.
 
 ## Requirements
 
-- [cux](https://github.com/inulute/cux) ≥ 0.2.12 (session registry)
-- macOS or Linux (Windows: planned)
+- [cux](https://github.com/inulute/cux) ≥ 0.2.12 (session heartbeat registry)
+- macOS or Linux today · Windows on the roadmap
+- A browser on the device you want to watch from. That's the whole list.
 
 ## License
 
-MIT
+MIT — do anything you like with it. See [LICENSE](LICENSE).
+
+<div align="center">
+<sub>Built alongside <a href="https://github.com/inulute/cux">cux</a>. Not affiliated with Anthropic.</sub>
+</div>
