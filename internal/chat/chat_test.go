@@ -50,10 +50,11 @@ func TestToolSummaries(t *testing.T) {
 	}
 }
 
-func TestToolResultDropped(t *testing.T) {
+func TestToolResultSummarized(t *testing.T) {
+	// The CLI shows every result as a collapsed "⎿" line; so do we.
 	evs := Parse([]byte(`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"ok"}]}}`))
-	if len(evs) != 0 {
-		t.Errorf("tool_result should be dropped, got %+v", evs)
+	if len(evs) != 1 || evs[0].Role != "result" || evs[0].Text != "ok" || evs[0].Detail != "" {
+		t.Errorf("expected one summary line, got %+v", evs)
 	}
 }
 
@@ -75,15 +76,25 @@ func TestGarbageAndNonChatSkipped(t *testing.T) {
 func TestMidTurnMessageSurfaced(t *testing.T) {
 	line := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"File created.\n\n<system-reminder>\nThe user sent a new message while you were working:\nhemen dur\n\nThis is how Claude Code surfaces messages...\n</system-reminder>"}]}}`
 	evs := Parse([]byte(line))
-	if len(evs) != 1 || evs[0].Role != "user" || evs[0].Text != "hemen dur" || evs[0].Detail != "sent mid-turn" {
+	var mid *Event
+	for i := range evs {
+		if evs[i].Detail == "sent mid-turn" {
+			mid = &evs[i]
+		}
+	}
+	if mid == nil || mid.Role != "user" || mid.Text != "hemen dur" {
 		t.Fatalf("got %+v", evs)
+	}
+	// the tool's own output still summarizes, without the reminder text
+	if len(evs) != 2 || evs[1].Role != "result" || evs[1].Text != "File created." {
+		t.Fatalf("summary: got %+v", evs)
 	}
 }
 
 func TestTaskCreateFromResult(t *testing.T) {
 	line := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"Task #3 created successfully: Deploy the app"}]}}`
 	evs := Parse([]byte(line))
-	if len(evs) != 1 || evs[0].Role != "task" || evs[0].Kind != "task-create" || evs[0].Tool != "3" || evs[0].Text != "Deploy the app" {
+	if len(evs) < 1 || evs[0].Role != "task" || evs[0].Kind != "task-create" || evs[0].Tool != "3" || evs[0].Text != "Deploy the app" {
 		t.Fatalf("got %+v", evs)
 	}
 }
@@ -112,7 +123,7 @@ func TestAskQuestionAndAnswer(t *testing.T) {
 func TestDeniedAndInterrupt(t *testing.T) {
 	d := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"The user doesn't want to proceed with this tool use. The tool use was rejected."}]}}`
 	evs := Parse([]byte(d))
-	if len(evs) != 1 || evs[0].Kind != "denied" {
+	if len(evs) != 1 || evs[0].Kind != "denied" || evs[0].Role != "result" || evs[0].ID != "t1" {
 		t.Fatalf("denied: got %+v", evs)
 	}
 	i := `{"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}`
@@ -135,5 +146,18 @@ func TestBashFullBody(t *testing.T) {
 	evs := Parse([]byte(line))
 	if len(evs) != 1 || evs[0].Full != "echo a\necho b" {
 		t.Fatalf("got %+v", evs)
+	}
+}
+
+func TestResultSummaryPairsWithCall(t *testing.T) {
+	line := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu9","content":"line one\nline two\nline three"}]}}`
+	evs := Parse([]byte(line))
+	if len(evs) != 1 || evs[0].Role != "result" || evs[0].ID != "tu9" || evs[0].Text != "line one" || evs[0].Detail != "+2 lines" {
+		t.Fatalf("got %+v", evs)
+	}
+	errLine := `{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu9","is_error":true,"content":"boom"}]}}`
+	evs = Parse([]byte(errLine))
+	if len(evs) != 1 || evs[0].Kind != "error" {
+		t.Fatalf("error: got %+v", evs)
 	}
 }

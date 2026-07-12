@@ -22,7 +22,8 @@ type Event struct {
 	Text   string `json:"text,omitempty"`   // bubble body / one-line tool summary
 	Tool   string `json:"tool,omitempty"`   // tool name (Kind==tool) or task id (task events)
 	Detail string `json:"detail,omitempty"` // secondary line (tool target, model names, options)
-	Full   string `json:"full,omitempty"`   // expandable body (whole command, task prompt)
+	Full   string `json:"full,omitempty"`   // expandable body (whole command, task prompt, result)
+	ID     string `json:"id,omitempty"`     // tool_use id — pairs a result line with its call
 	TS     string `json:"ts,omitempty"`     // when Claude Code recorded the line (RFC3339)
 	Tokens int    `json:"tokens,omitempty"` // output tokens of the assistant message (first event only)
 }
@@ -50,7 +51,10 @@ type block struct {
 	Thinking string          `json:"thinking"`
 	Name     string          `json:"name"`
 	Input    json.RawMessage `json:"input"`
-	Content  json.RawMessage `json:"content"` // tool_result payload
+	Content  json.RawMessage `json:"content"`     // tool_result payload
+	ID       string          `json:"id"`          // tool_use id on the call
+	ToolID   string          `json:"tool_use_id"` // tool_use id on the result
+	IsError  bool            `json:"is_error"`
 	From     modelRef        `json:"from"`
 	To       modelRef        `json:"to"`
 }
@@ -116,9 +120,9 @@ func Parse(line []byte) []Event {
 				out = append(out, Event{Role: "assistant", Kind: "thinking", Text: t})
 			}
 		case "tool_use":
-			out = append(out, toolEvents(b.Name, b.Input)...)
+			out = append(out, toolEvents(b.Name, b.ID, b.Input)...)
 		case "tool_result":
-			out = append(out, resultEvents(b.Content)...)
+			out = append(out, resultEvents(b.Content, b.ToolID, b.IsError)...)
 		case "image":
 			out = append(out, Event{Role: role, Kind: "image", Text: "🖼 image"})
 		case "fallback":
@@ -196,7 +200,7 @@ func xmlField(s, tag string) string {
 // structured events so the panel can show live checklists and question
 // cards; everything else becomes a one-line tool call with an optional
 // expandable body.
-func toolEvents(name string, input json.RawMessage) []Event {
+func toolEvents(name, id string, input json.RawMessage) []Event {
 	switch name {
 	case "TaskCreate":
 		// The canonical create event comes from the tool result, which
@@ -249,7 +253,7 @@ func toolEvents(name string, input json.RawMessage) []Event {
 		return out
 	}
 	summary, detail, full := toolSummary(name, input)
-	return []Event{{Role: "tool", Kind: "tool", Tool: name, Text: summary, Detail: detail, Full: full}}
+	return []Event{{Role: "tool", Kind: "tool", Tool: name, Text: summary, Detail: detail, Full: full, ID: id}}
 }
 
 const midTurnMarker = "The user sent a new message while you were working:"
@@ -274,16 +278,22 @@ func midTurnEvent(t string) (Event, bool) {
 	return Event{}, false
 }
 
-// resultEvents inspects a tool_result payload for the few outcomes worth
-// showing: task creation (the id lives only here), answered questions,
-// permission denials, and mid-turn user messages appended to a result.
-// Ordinary outputs stay hidden — the tool line already stands for the
-// exchange.
-func resultEvents(content json.RawMessage) []Event {
+// resultEvents renders a tool_result the way the CLI does: a one-line
+// "⎿" summary attached (by tool_use id) under its call, expandable to
+// the head of the real output. Results that mean something more —
+// task creation, answered questions, permission denials, mid-turn user
+// messages appended to an output — additionally emit their structured
+// events.
+func resultEvents(content json.RawMessage, toolID string, isError bool) []Event {
 	t := resultText(content)
 	var out []Event
 	if ev, ok := midTurnEvent(t); ok {
 		out = append(out, ev)
+		// The reminder is bookkeeping appended to the real output; strip
+		// it so the summary below shows only what the tool returned.
+		if i := strings.Index(t, "<system-reminder>"); i >= 0 {
+			t = t[:i]
+		}
 	}
 	switch {
 	case strings.HasPrefix(t, "Task #") && strings.Contains(t, " created successfully: "):
@@ -296,10 +306,49 @@ func resultEvents(content json.RawMessage) []Event {
 		out = append(out, Event{Role: "task", Kind: "task-create", Tool: id, Text: subject})
 	case strings.HasPrefix(t, "Your questions have been answered:"):
 		out = append(out, Event{Role: "ask", Kind: "answer", Text: askAnswers(t)})
+		return out
 	case strings.Contains(t, "doesn't want to proceed with this tool use"):
-		out = append(out, Event{Role: "system", Kind: "denied", Text: "user declined this action"})
+		out = append(out, Event{Role: "result", Kind: "denied", ID: toolID,
+			Text: "No — user declined this action"})
+		return out
+	}
+	if sum, full, more := resultSummary(t); sum != "" {
+		kind := "result"
+		if isError {
+			kind = "error"
+		}
+		out = append(out, Event{Role: "result", Kind: kind, ID: toolID, Text: sum, Detail: more, Full: full})
 	}
 	return out
+}
+
+// resultSummary condenses an output to its first meaningful line plus a
+// "+N lines" note, and keeps a bounded body for the expanded view.
+func resultSummary(t string) (sum, full, more string) {
+	t = strings.TrimSpace(t)
+	if t == "" {
+		return "", "", ""
+	}
+	lines := strings.Split(t, "\n")
+	sum = oneLine(lines[0], 110)
+	if n := len(lines) - 1; n > 0 {
+		more = "+" + itoa(n) + " lines"
+	}
+	return sum, clip(t, 3000), more
+}
+
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [20]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
 }
 
 // resultText flattens a tool_result content payload (bare string or a

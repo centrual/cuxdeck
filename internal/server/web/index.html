@@ -143,7 +143,7 @@ nav button.on{color:var(--acc)}
 .tappable{cursor:pointer}
 .tappable:active{transform:scale(.99)}
 
-/* ---------- chat view ---------- */
+/* ---------- chat view — faithful to Claude Code's own rendering ---------- */
 #chat{position:fixed;inset:0;z-index:45;background:var(--bg);display:flex;flex-direction:column;
   transform:translateX(100%);transition:transform .3s cubic-bezier(.2,.8,.25,1)}
 #chat.show{transform:none}
@@ -153,68 +153,75 @@ nav button.on{color:var(--acc)}
 #chat .chead .back{font-size:26px;background:none;border:0;color:var(--acc);cursor:pointer;padding:0 4px 0 0;line-height:1}
 #chat .chead .grow{min-width:0}
 #chat .chead h2{font-size:15px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#chat .chead .sub{font-size:12px}
-#clog{flex:1;overflow-y:auto;padding:14px 12px calc(20px + env(safe-area-inset-bottom));
-  display:flex;flex-direction:column;gap:10px;-webkit-overflow-scrolling:touch;
-  overscroll-behavior:contain}
+#chat .chead .sub{font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+#clog{flex:1;overflow-y:auto;padding:14px 14px calc(20px + env(safe-area-inset-bottom));
+  -webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;line-height:1.6;
+  color:var(--fg)}
 body.chat-open{overflow:hidden;position:fixed;inset:0;width:100%}
-.msg{max-width:86%;padding:10px 13px;border-radius:16px;font-size:14.5px;line-height:1.5;
-  word-break:break-word;animation:rise .28s both}
-.msg.user{align-self:flex-end;background:linear-gradient(135deg,var(--acc),var(--acc2));color:#fff;
-  border-bottom-right-radius:5px}
-.msg.assistant{align-self:flex-start;background:var(--card2);border:1px solid var(--line);
-  border-bottom-left-radius:5px}
-.msg p{margin:0 0 8px}.msg p:last-child{margin:0}
-.msg code{font-family:ui-monospace,monospace;font-size:.88em;background:rgba(128,128,128,.22);
-  border-radius:4px;padding:1px 5px}
-.msg.user code{background:rgba(0,0,0,.25)}
-.msg pre{background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:9px 11px;
-  overflow-x:auto;margin:8px 0;max-width:100%}
-.msg pre code{background:none;padding:0;font-size:12px;white-space:pre}
-.msg.user pre{background:rgba(0,0,0,.3);border-color:transparent}
-.msg ul,.msg ol{margin:0 0 8px;padding-left:20px}
-.msg li{margin:2px 0}
-.msg h1,.msg h2,.msg h3,.msg h4{font-size:1.02em;margin:10px 0 6px}
-.msg a{color:var(--acc);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--acc) 40%,transparent)}
-.msg.user a{color:#fff}
-.msg blockquote{margin:6px 0;padding:2px 10px;border-left:3px solid var(--line);color:var(--dim)}
-.midturn{align-self:flex-end;font-size:10.5px;color:var(--faint);margin:-6px 4px 0 0}
-.tool{align-self:flex-start;max-width:92%;font-size:12.5px;color:var(--dim);padding:2px 6px}
-.tool .trow{display:flex;gap:8px;align-items:baseline}
-.tool.has-full .trow{cursor:pointer}
-.tool .tname{color:var(--fg);font-weight:700;white-space:nowrap}
-.tool .tdet{font-family:ui-monospace,monospace;font-size:11.5px;color:var(--faint);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
-.tool .tcaret{color:var(--faint);font-size:10px;flex:none}
-.tool .tfull{display:none;font-family:ui-monospace,monospace;font-size:11.5px;color:var(--dim);
-  background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-top:5px;
-  white-space:pre-wrap;word-break:break-all;max-height:40vh;overflow-y:auto;overscroll-behavior:contain}
-.tool.open .tfull{display:block}
-.tool.open .tcaret{transform:rotate(90deg);display:inline-block}
-.think{align-self:flex-start;max-width:88%;font-size:12.5px;color:var(--faint);font-style:italic;
-  padding:4px 10px;border-left:2px solid var(--line);cursor:pointer}
+/* user turn: the CLI's dark full-width bar with a prompt marker */
+.uline{background:color-mix(in srgb,var(--fg) 9%,var(--bg));border-radius:6px;
+  padding:8px 11px;margin:14px 0 8px;white-space:pre-wrap;word-break:break-word;
+  display:flex;gap:8px;animation:rise .25s both}
+.uline .pfx{color:var(--dim);flex:none;user-select:none}
+.uline .chip{font-size:10px;color:var(--faint);display:block;margin-top:5px}
+/* assistant text: plain flowing document, markdown rendered */
+.aline{padding:3px 1px;margin:4px 0;word-break:break-word;animation:rise .25s both}
+.aline p{margin:0 0 9px}.aline p:last-child{margin:0}
+.aline code{background:rgba(128,128,128,.22);border-radius:4px;padding:1px 5px;font-size:.92em}
+.aline pre{background:var(--bg2);border:1px solid var(--line);border-radius:8px;padding:9px 11px;
+  overflow-x:auto;margin:8px 0}
+.aline pre code{background:none;padding:0;white-space:pre}
+.aline ul,.aline ol{margin:0 0 9px;padding-left:22px}
+.aline li{margin:2px 0}
+.aline h1,.aline h2,.aline h3,.aline h4{font-size:1em;margin:10px 0 6px;color:var(--acc)}
+.aline a{color:var(--acc);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--acc) 40%,transparent)}
+.aline b{font-weight:800}
+.aline blockquote{margin:6px 0;padding:2px 10px;border-left:3px solid var(--line);color:var(--dim)}
+/* tool call: "⏺ Bash(cmd…)" with its "⎿ result" beneath */
+.tline{padding:5px 1px 0;word-break:break-word}
+.tline .trow{display:flex;gap:7px;align-items:baseline}
+.tline.has-full .trow{cursor:pointer}
+.tline .dot{color:var(--ok);flex:none}
+.tline.pending .dot{color:var(--dim)}
+.tline .tname{font-weight:700;white-space:nowrap;flex:none}
+.tline .targ{color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.tres{display:flex;gap:7px;align-items:baseline;padding:0 1px 2px;color:var(--dim)}
+.tres .elb{color:var(--faint);flex:none;padding-left:3px}
+.tres .rsum{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.tres .more{color:var(--faint);flex:none;font-size:11px}
+.tres.err,.tres.err .rsum{color:var(--bad)}
+.tres.has-full{cursor:pointer}
+.tfull{display:none;font-size:11.5px;color:var(--dim);background:var(--bg2);
+  border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:4px 0 6px 18px;
+  white-space:pre-wrap;word-break:break-word;max-height:44vh;overflow-y:auto;overscroll-behavior:contain}
+.open>.tfull{display:block}
+/* thinking: one dim italic line, tap to unfold */
+.think{color:var(--faint);font-style:italic;padding:4px 1px;cursor:pointer;word-break:break-word}
 .think .tprev{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .think .tbody{display:none;white-space:pre-wrap;margin-top:4px}
 .think.open .tprev{display:none}
 .think.open .tbody{display:block}
-.cdiv{align-self:center;font-size:10.5px;color:var(--faint);text-transform:uppercase;letter-spacing:1px;
-  padding:8px 0;width:70%;text-align:center}
-.cdiv.command{font-family:ui-monospace,monospace;text-transform:none;letter-spacing:0;
-  background:var(--card);border:1px solid var(--line);border-radius:8px;padding:6px 12px;width:auto;
-  max-width:86%;color:var(--dim)}
-.cdenied{align-self:flex-start;font-size:12px;color:var(--bad);background:color-mix(in srgb,var(--bad) 10%,transparent);
-  border:1px solid color-mix(in srgb,var(--bad) 30%,transparent);border-radius:9px;padding:6px 11px}
-.cask{align-self:flex-start;max-width:88%;background:var(--card);border:1px solid var(--line);
-  border-radius:12px;padding:10px 13px;font-size:13px}
-.cask .qhead{font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--acc);margin-bottom:4px}
-.cask .qopts{margin-top:6px;font-size:11.5px;color:var(--faint)}
-.cask.answer{align-self:flex-end;border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
-.cstat{align-self:center;font-size:11.5px;color:var(--faint);padding:6px 0;display:flex;align-items:center;gap:7px}
-.cstat .pulse{width:7px;height:7px}
-.readonly{align-self:center;font-size:11.5px;color:var(--faint);background:var(--card);
-  border:1px solid var(--line);border-radius:99px;padding:7px 14px;margin:2px 0 8px}
+/* dividers, commands, status */
+.cdiv{color:var(--faint);font-size:11px;padding:8px 1px;letter-spacing:.4px}
+.cdiv.command{background:color-mix(in srgb,var(--fg) 9%,var(--bg));border-radius:6px;
+  color:var(--dim);padding:7px 11px;margin:12px 0 4px}
+.worked{color:var(--faint);font-size:11.5px;padding:8px 1px 2px}
+.cdenied{color:var(--bad);padding:0 1px 2px;display:flex;gap:7px}
+.cask{background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:10px 13px;margin:8px 0;font-size:12.5px}
+.cask .qhead{font-size:10px;font-weight:800;letter-spacing:1px;text-transform:uppercase;color:var(--acc);margin-bottom:4px}
+.cask .qopts{margin-top:6px;font-size:11px;color:var(--faint)}
+.cask.answer{border-color:color-mix(in srgb,var(--acc) 45%,transparent)}
+.cstat{color:var(--acc);padding:10px 1px;display:flex;align-items:center;gap:8px;font-size:12.5px}
+.cstat .spin{animation:spinstar 1.6s linear infinite;display:inline-block}
+@keyframes spinstar{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
+.cstat .sdetail{color:var(--faint)}
+.readonly{color:var(--faint);font-size:11px;background:var(--card);border:1px solid var(--line);
+  border-radius:99px;padding:6px 12px;margin:0 auto 10px;width:fit-content}
 #ctasks{display:none;border-bottom:1px solid var(--line);background:var(--bg2);
-  padding:8px 16px;font-size:12.5px;flex:none;max-height:38vh;overflow-y:auto;overscroll-behavior:contain}
+  padding:8px 16px;font-size:12px;flex:none;max-height:38vh;overflow-y:auto;overscroll-behavior:contain;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 #ctasks.show{display:block}
 #ctasks .thead{display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:700;color:var(--fg)}
 #ctasks .thead .prog{color:var(--faint);font-weight:400}
@@ -613,8 +620,9 @@ function openStream(url,subPrefix,title){
   const tk=$('ctasks');tk.classList.remove('show','open');tk.innerHTML='';
   // Status model: what the session is doing right now, derived from the
   // event stream the same way Claude Code's own status line is.
-  CHAT_ST={caughtUp:false,lastTs:0,last:null,turnStart:0,turnTokens:0,prefix:subPrefix,
-    tasks:new Map(),todos:null,snap:false,queued:new Map()};
+  CHAT_ST={caughtUp:false,lastTs:0,last:null,turnStart:0,turnTokens:0,lastAssistTs:0,
+    prefix:subPrefix,tasks:new Map(),todos:null,snap:false,queued:new Map(),
+    toolEls:new Map(),pillEl:null};
   // EventSource can't set headers, so the token rides the query string
   // over the already-TLS'd tunnel; the endpoint accepts either form.
   CHAT_ES=new EventSource(url+'?token='+encodeURIComponent(TOK));
@@ -623,20 +631,21 @@ function openStream(url,subPrefix,title){
   // nothing shows up twice.
   CHAT_ES.onopen=()=>{if(gotAny){
     log.innerHTML='';log.appendChild(ro);liveMark=null;gotAny=false;
-    Object.assign(CHAT_ST,{caughtUp:false,tasks:new Map(),todos:null,turnTokens:0,snap:false,queued:new Map()});
+    Object.assign(CHAT_ST,{caughtUp:false,tasks:new Map(),todos:null,turnTokens:0,snap:false,queued:new Map(),toolEls:new Map(),pillEl:null,turnStart:0,lastAssistTs:0});
     $('ctasks').classList.remove('show');
   }};
   CHAT_ES.onmessage=e=>{try{const ev=JSON.parse(e.data);
     gotAny=true;
+    const n=renderEvent(ev); // render first: turn boundaries need pre-update state
     trackStatus(ev);
-    const n=renderEvent(ev);
-    if(!n)return;
-    if(ev.role==='system'&&ev.kind==='caught-up'){
-      if(liveMark)liveMark.remove(); // only ever one live pill
-      liveMark=n;
+    if(n){
+      if(ev.role==='system'&&ev.kind==='caught-up'){
+        if(liveMark)liveMark.remove(); // only ever one live pill
+        liveMark=n;CHAT_ST.pillEl=n;
+      }
+      log.appendChild(n);
+      if(liveMark&&n!==liveMark)log.appendChild(liveMark); // pinned to the tail
     }
-    log.appendChild(n);
-    if(liveMark&&n!==liveMark)log.appendChild(liveMark); // pinned to the tail
     stick()}catch{}};
   CHAT_ES.onerror=()=>{};
   CHAT_TICK=setInterval(renderStatus,1000);
@@ -651,7 +660,10 @@ function trackStatus(ev){
   if(ev.role==='system'&&ev.kind==='caught-up'){st.caughtUp=true;renderStatus();renderTasks();return}
   if(ev.ts){st.lastTs=Date.parse(ev.ts)||st.lastTs}
   st.last=ev;
-  if(ev.role==='user'&&ev.kind==='text'){st.turnStart=st.lastTs;st.turnTokens=0}
+  // only a real turn-opening prompt resets the turn — not queued copies
+  // or mid-turn injections
+  if(ev.role==='user'&&ev.kind==='text'&&!ev.detail){st.turnStart=st.lastTs;st.turnTokens=0}
+  if(ev.role==='assistant'||ev.role==='tool'||ev.role==='result')st.lastAssistTs=st.lastTs;
   if(ev.tokens)st.turnTokens+=ev.tokens;
   if(st.caughtUp)renderStatus();
 }
@@ -669,22 +681,30 @@ function renderStatus(){
   const pre=st.prefix?st.prefix+' · ':'';
   const nq=[...st.queued.values()].filter(e=>e&&e.st==='pending').length;
   const qsuf=nq?' · ⏳ '+nq+' queued':'';
-  if(!st.last||!st.lastTs){el.textContent=pre+'live'+qsuf;return}
-  const idle=Date.now()-st.lastTs;
-  const turn=st.turnStart?fmtDur(Date.now()-st.turnStart):'';
-  const tok=st.turnTokens?' · ↓ '+fmtTok(st.turnTokens)+' tokens':'';
-  let line;
-  if(idle>150000){ // no writes for 2.5 min — the session is idle
-    line='idle · last activity '+fmtDur(idle)+' ago';
-  }else if(st.last.role==='tool'){
-    const name=(st.last.tool||'tool').split('__').pop(); // mcp__server__tool → tool
-    line='⚡ running '+name+' · '+fmtDur(idle)+(turn?' · turn '+turn:'')+tok;
-  }else if(st.last.role==='user'){
-    line='✳ thinking · '+fmtDur(idle)+tok;
-  }else{
-    line='✳ working · turn '+(turn||fmtDur(idle))+tok;
+  let line,busy=false;
+  if(!st.last||!st.lastTs){line='live'}
+  else{
+    const idle=Date.now()-st.lastTs;
+    const turn=st.turnStart?fmtDur(Date.now()-st.turnStart):'';
+    const tok=st.turnTokens?' · ↓ '+fmtTok(st.turnTokens)+' tokens':'';
+    if(idle>150000){ // no writes for 2.5 min — the session is idle
+      line='Idle · last activity '+fmtDur(idle)+' ago';
+    }else if(st.last.role==='tool'||st.last.role==='result'){
+      const name=((st.last.role==='tool'?st.last.tool:st.last.text)||'tool').split('__').pop();
+      const run=st.last.role==='tool'?'Running '+name+'… ('+fmtDur(idle):'Working… ('+fmtDur(idle);
+      line=run+(turn?' · turn '+turn:'')+tok+')';busy=true;
+    }else if(st.last.role==='user'){
+      line='Thinking… ('+fmtDur(idle)+tok+')';busy=true;
+    }else{
+      line='Working… ('+(turn||fmtDur(idle))+tok+')';busy=true;
+    }
   }
-  el.textContent=pre+line+qsuf;
+  el.textContent=pre+(busy?'✳ ':'')+line+qsuf;
+  if(st.pillEl){
+    st.pillEl.innerHTML=busy
+      ?'<span class="spin">✳</span> '+esc(line)+' <span class="sdetail">· live</span>'
+      :'<span class="pulse"></span><span class="sdetail">'+esc(line)+' — watching for new messages</span>';
+  }
 }
 
 /* Minimal, safe markdown: escape first, then only our own tags get in. */
@@ -720,62 +740,111 @@ function md(src){
 }
 function firstln(s){s=String(s).trim();const i=s.indexOf('\n');if(i>=0)s=s.slice(0,i);return s.length>90?s.slice(0,90)+'…':s}
 
+function toggleFull(fullEl){fullEl.style.display=fullEl.style.display==='block'?'none':'block'}
+
 function renderEvent(ev){
-  const d=document.createElement('div');
+  const st=CHAT_ST;
   if(ev.role==='task'){updateTasks(ev);return null}
+
   if(ev.role==='ask'){
+    const d=document.createElement('div');
     d.className='cask'+(ev.kind==='answer'?' answer':'');
     if(ev.kind==='question'){
       d.innerHTML=(ev.tool?'<div class="qhead">'+esc(ev.tool)+'</div>':'<div class="qhead">question</div>')
-        +esc(ev.text)+(ev.detail?'<div class="qopts">◦ '+esc(ev.detail)+'</div>':'');
+        +md(ev.text)+(ev.detail?'<div class="qopts">◦ '+esc(ev.detail)+'</div>':'');
     }else{d.innerHTML='<div class="qhead">answered</div>'+esc(ev.text)}
     return d;
   }
-  if(ev.role==='user'||ev.role==='assistant'){
+
+  if(ev.role==='user'&&ev.kind==='text'){
+    if(ev.detail!=='queued'&&markDelivered(ev.text))return null;
+    const frag=document.createDocumentFragment();
+    // close the previous turn the way the CLI does
+    if(st&&!ev.detail&&st.turnStart&&st.lastAssistTs>st.turnStart){
+      const wk=document.createElement('div');wk.className='worked';
+      wk.textContent='✳ Worked for '+fmtDur(st.lastAssistTs-st.turnStart);
+      frag.appendChild(wk);
+    }
+    const d=document.createElement('div');d.className='uline';
+    const chip=ev.detail==='queued'?'⏳ queued — waiting for Claude'
+      :ev.detail==='sent mid-turn'?'⏱ sent mid-turn':'';
+    d.innerHTML='<span class="pfx">❯</span><span style="min-width:0">'+esc(ev.text)
+      +(chip?'<span class="chip">'+chip+'</span>':'')+'</span>';
+    if(ev.detail==='queued'&&st){st.queued.set(ev.text,{el:d,st:'pending'});renderStatus()}
+    frag.appendChild(d);
+    return frag;
+  }
+
+  if(ev.role==='user'&&ev.kind==='image'){
+    const d=document.createElement('div');d.className='uline';
+    d.innerHTML='<span class="pfx">❯</span><span>[Image]</span>';return d;
+  }
+
+  if(ev.role==='assistant'){
+    const d=document.createElement('div');
     if(ev.kind==='thinking'){
-      // Collapsed to one line like the CLI; tap to read it all.
       d.className='think';
-      d.innerHTML='<span class="tprev">✻ '+esc(firstln(ev.text))+'</span><span class="tbody">'+esc(ev.text)+'</span>';
+      d.innerHTML='<span class="tprev">✻ Thinking… '+esc(firstln(ev.text))+'</span><span class="tbody">✻ '+esc(ev.text)+'</span>';
       d.onclick=()=>d.classList.toggle('open');
       return d;
     }
-    if(ev.kind==='image'){d.className='msg '+ev.role;d.textContent='🖼 image';return d}
-    // Queue lifecycle: an enqueued message renders once with a
-    // "queued" chip that flips on delivery. Delivery can surface as a
-    // mid-turn echo, a normal next-turn prompt, or a slash command —
-    // any later user event with the same text counts and is deduped.
-    if(ev.role==='user'&&ev.detail!=='queued'&&markDelivered(ev.text))return null;
-    d.className='msg '+ev.role;
-    const chip=ev.detail==='queued'?'⏳ queued — waiting for Claude'
-      :ev.detail==='sent mid-turn'?'⏱ sent mid-turn':'';
-    d.innerHTML=md(ev.text)+(chip?'<div class="chip" style="font-size:10px;opacity:.75;margin-top:6px">'+chip+'</div>':'');
-    if(ev.role==='user'&&ev.detail==='queued'&&CHAT_ST){CHAT_ST.queued.set(ev.text,{el:d,st:'pending'});renderStatus()}
+    if(ev.kind==='image'){d.className='aline';d.textContent='[Image]';return d}
+    d.className='aline';d.innerHTML=md(ev.text);
+    return d;
+  }
+
+  if(ev.role==='tool'){
+    const d=document.createElement('div');
+    d.className='tline pending'+(ev.full?' has-full':'');
+    const arg=ev.detail?'('+ev.detail+')':'';
+    d.innerHTML='<div class="trow"><span class="dot">⏺</span>'
+      +'<span class="tname">'+esc((ev.text||'').replace(/^\S+\s/,''))+'</span>'
+      +'<span class="targ">'+esc(arg)+'</span></div>'
+      +(ev.full?'<div class="tfull">'+esc(ev.full)+'</div>':'');
+    if(ev.full){const f=d.querySelector('.tfull');d.querySelector('.trow').onclick=()=>toggleFull(f)}
+    if(st&&ev.id)st.toolEls.set(ev.id,d);
+    return d;
+  }
+
+  if(ev.role==='result'){
+    // "⎿ summary" attaches under its call; standalone if the call is
+    // not in view (never emitted, or a shape we didn't track).
+    const row=document.createElement('div');
+    row.className='tres'+(ev.kind==='error'||ev.kind==='denied'?' err':'')+(ev.full?' has-full':'');
+    row.innerHTML='<span class="elb">⎿</span><span class="rsum">'+esc(ev.text)+'</span>'
+      +(ev.detail?'<span class="more">'+esc(ev.detail)+'</span>':'');
+    let full=null;
+    if(ev.full){full=document.createElement('div');full.className='tfull';full.textContent=ev.full;
+      row.onclick=()=>toggleFull(full)}
+    const tl=st&&ev.id?st.toolEls.get(ev.id):null;
+    if(tl){
+      tl.classList.remove('pending');
+      if(ev.kind==='error'||ev.kind==='denied')tl.querySelector('.dot').style.color='var(--bad)';
+      tl.appendChild(row);if(full)tl.appendChild(full);
+      return null; // inserted in place under the call
+    }
+    if(full){const wrap=document.createElement('div');wrap.appendChild(row);wrap.appendChild(full);return wrap}
+    return row;
+  }
+
+  if(ev.role==='divider'){
+    const d=document.createElement('div');
+    if(ev.kind==='command'){markDelivered(ev.text);d.className='cdiv command';
+      d.innerHTML='<span style="color:var(--faint)">❯</span> '+esc(ev.text);return d}
+    if(ev.kind==='interrupt'){d.className='cdiv';d.textContent='⎿ Interrupted · user sent a new instruction';return d}
+    d.className='cdiv';d.textContent='⏵ '+(ev.detail||ev.text);return d;
+  }
+
+  if(ev.role==='system'&&ev.kind==='caught-up'){
+    const d=document.createElement('div');d.className='cstat';
+    d.innerHTML='<span class="pulse"></span><span class="sdetail">live — watching for new messages</span>';
     return d;
   }
   if(ev.role==='system'&&ev.kind==='queue-remove'){
-    // The CLI popped it off the queue; the delivered copy will still
-    // echo through the stream right after, so expect one more match.
-    const st=CHAT_ST,e=st&&st.queued.get(ev.text);
+    const e=CHAT_ST&&CHAT_ST.queued.get(ev.text);
     if(e&&e.st==='pending'){flipChip(e);e.st='removed';renderStatus()}
     return null;
   }
-  if(ev.role==='tool'){
-    d.className='tool'+(ev.full?' has-full':'');
-    d.innerHTML='<div class="trow"><span class="tname">'+esc(ev.text)+'</span>'
-      +(ev.detail?'<span class="tdet">'+esc(ev.detail)+'</span>':'')
-      +(ev.full?'<span class="tcaret">▶</span>':'')+'</div>'
-      +(ev.full?'<div class="tfull">'+esc(ev.full)+'</div>':'');
-    if(ev.full)d.querySelector('.trow').onclick=()=>d.classList.toggle('open');
-    return d;
-  }
-  if(ev.role==='system'&&ev.kind==='denied'){d.className='cdenied';d.textContent='⛔ '+ev.text;return d}
-  if(ev.role==='divider'){
-    if(ev.kind==='command'){markDelivered(ev.text);d.className='cdiv command';d.textContent='❯ '+ev.text;return d}
-    if(ev.kind==='interrupt'){d.className='cdiv';d.textContent='⏸ '+ev.text;return d}
-    d.className='cdiv';d.textContent=ev.detail||ev.text;return d;
-  }
-  if(ev.role==='system'&&ev.kind==='caught-up'){d.className='cstat';
-    d.innerHTML='<span class="pulse"></span>live — watching for new messages';return d}
   return null;
 }
 
