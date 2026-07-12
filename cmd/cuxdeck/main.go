@@ -8,8 +8,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -31,6 +33,37 @@ func home() string {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "install":
+			if err := installService(); err != nil {
+				fmt.Fprintln(os.Stderr, "cuxdeck:", err)
+				os.Exit(1)
+			}
+			fmt.Println("cuxdeck now starts with this computer. Logs: " + filepath.Join(home(), "cuxdeck.log"))
+			return
+		case "uninstall":
+			if err := uninstallService(); err != nil {
+				fmt.Fprintln(os.Stderr, "cuxdeck:", err)
+				os.Exit(1)
+			}
+			fmt.Println("cuxdeck will no longer start automatically.")
+			return
+		case "qr":
+			cmdQR()
+			return
+		case "status":
+			cmdStatus()
+			return
+		case "version", "--version":
+			fmt.Println("cuxdeck", version)
+			return
+		case "help", "--help", "-h":
+			printHelp()
+			return
+		}
+	}
+
 	port := flag.Int("port", 8447, "local port (127.0.0.1 only)")
 	noTunnel := flag.Bool("no-tunnel", false, "serve locally without the public tunnel")
 	flag.Parse()
@@ -72,6 +105,7 @@ func main() {
 		},
 		OnURL: func(u string) {
 			fmt.Printf("\ncuxdeck: tunnel up — %s\n", u)
+			_ = os.WriteFile(filepath.Join(home(), "current-url"), []byte(u), 0o600)
 			showPairing(st, u)
 		},
 	}
@@ -121,4 +155,67 @@ func printQR(content string) {
 		}
 		fmt.Println(line)
 	}
+}
+
+// cmdQR asks the running daemon for a fresh single-use code and
+// renders the pairing QR against the current public address.
+func cmdQR() {
+	port := 8447
+	resp, err := http.Post(fmt.Sprintf("http://127.0.0.1:%d/local/pairing", port), "application/json", nil)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "cuxdeck: daemon not running — start it with `cuxdeck` or `cuxdeck install`")
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		Code string `json:"code"`
+	}
+	if err := jsonDecode(resp.Body, &out); err != nil || out.Code == "" {
+		fmt.Fprintln(os.Stderr, "cuxdeck: unexpected daemon response")
+		os.Exit(1)
+	}
+	base := fmt.Sprintf("http://127.0.0.1:%d", port)
+	if b, err := os.ReadFile(filepath.Join(home(), "current-url")); err == nil && len(b) > 0 {
+		base = string(b)
+	}
+	fmt.Println("Scan to pair a phone (code is single-use, valid 10 minutes):")
+	printQR(base + "/#p=" + out.Code)
+	fmt.Printf("or open  %s\n   code:  %s\n", base, out.Code)
+}
+
+// cmdStatus reports whether the daemon and its tunnel are up.
+func cmdStatus() {
+	resp, err := http.Get("http://127.0.0.1:8447/")
+	if err != nil {
+		fmt.Println("daemon   : not running (start with `cuxdeck` or `cuxdeck install`)")
+		return
+	}
+	resp.Body.Close()
+	fmt.Println("daemon   : running on 127.0.0.1:8447")
+	if b, err := os.ReadFile(filepath.Join(home(), "current-url")); err == nil && len(b) > 0 {
+		fmt.Println("tunnel   :", string(b))
+	} else {
+		fmt.Println("tunnel   : not established")
+	}
+	fmt.Println("pair     : run `cuxdeck qr`")
+}
+
+func printHelp() {
+	fmt.Println(`cuxdeck — mission control for your cux fleet
+
+USAGE
+  cuxdeck                 run the deck (server + tunnel + pairing QR)
+  cuxdeck install         start automatically with this computer
+  cuxdeck uninstall       stop starting automatically
+  cuxdeck qr              show a fresh pairing QR (daemon must be running)
+  cuxdeck status          daemon and tunnel state
+  cuxdeck version         print version
+
+FLAGS (for the run mode)
+  --port N                local port (default 8447)
+  --no-tunnel             local-only, skip the public tunnel`)
+}
+
+func jsonDecode(r io.Reader, v any) error {
+	return json.NewDecoder(r).Decode(v)
 }

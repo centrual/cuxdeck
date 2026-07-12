@@ -7,6 +7,7 @@ package server
 import (
 	"embed"
 	"encoding/json"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/action", s.authed(s.action))
 	mux.HandleFunc("GET /api/devices", s.authed(s.devices))
 	mux.HandleFunc("POST /api/devices/revoke", s.authed(s.revoke))
+	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
 	return securityHeaders(mux)
 }
 
@@ -130,4 +132,34 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	s.Auth.Revoke(in.ID)
 	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// localOnly guards endpoints that must never be reachable through the
+// tunnel. External requests arrive via cloudflared, which always adds
+// Cf-* headers and carries the public hostname — a request with a
+// loopback Host and no Cf-Connecting-Ip can only have originated on
+// this machine, where the caller could read ~/.cuxdeck anyway.
+func (s *Server) localOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host := r.Host
+		if h, _, err := netSplitHost(host); err == nil {
+			host = h
+		}
+		if r.Header.Get("Cf-Connecting-Ip") != "" ||
+			(host != "127.0.0.1" && host != "localhost" && host != "::1") {
+			http.Error(w, `{"error":"local only"}`, http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// newPairing mints a fresh single-use code for `cuxdeck qr` and the
+// menu bar's pair action.
+func (s *Server) newPairing(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]string{"code": s.Auth.NewPairingCode()})
+}
+
+func netSplitHost(hostport string) (string, string, error) {
+	return net.SplitHostPort(hostport)
 }
