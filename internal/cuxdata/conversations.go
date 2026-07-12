@@ -71,6 +71,19 @@ func LoadConversations(limit int) []Conversation {
 		out[i].CWD, out[i].Title = peekTranscript(out[i].Path)
 		out[i].Active = time.Since(out[i].UpdatedAt) < activeWindow
 	}
+	// Active transcripts are all "being written right now", so ordering
+	// them by exact mtime makes the top of the list reshuffle on every
+	// poll as writers race. Order actives by id instead — stable across
+	// polls — and keep idle ones newest-first.
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Active != out[j].Active {
+			return out[i].Active
+		}
+		if out[i].Active {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
+	})
 	return out
 }
 

@@ -391,15 +391,23 @@ function tab(t){CUR=t;
 
 function skeletons(){$('main').innerHTML='<div class="skel"></div><div class="skel"></div><div class="skel"></div>'}
 
+let LAST_HTML={};
 function render(){
   if(!DECK){skeletons();return}
   $('host').textContent=DECK.hostname;
   const M=$('main');
-  if(CUR==='deck')M.innerHTML=renderDeck();
-  if(CUR==='seats')M.innerHTML=renderSeats();
-  if(CUR==='projects')M.innerHTML=renderProjects();
-  if(CUR==='settings'){renderSettings()}
+  if(CUR==='settings'){renderSettings();return}
+  const html=CUR==='deck'?renderDeck():CUR==='seats'?renderSeats():renderProjects();
+  // Re-render only on real change: relative times live in data-tick
+  // placeholders the 1s ticker fills, so identical data means identical
+  // markup — replacing the DOM every poll made the whole list blink.
+  if(LAST_HTML[CUR]===html&&M.dataset.tab===CUR)return;
+  LAST_HTML[CUR]=html;M.dataset.tab=CUR;
+  M.innerHTML=html;
+  tickPass();
 }
+function tickPass(){document.querySelectorAll('[data-tick]').forEach(el=>{
+  el.textContent=ago(el.dataset.tick)+(el.dataset.suffix||'')})}
 
 function renderDeck(){
   const ss=DECK.sessions||[];
@@ -418,7 +426,7 @@ function renderDeck(){
           <div class="grow">
             <h3 class="ellip">${esc(shortDir(s.cwd))}</h3>
             <div class="sub">seat <b>${esc(s.seat?s.seat.split('@')[0]:'—')}</b>
-              · up <span data-tick="${esc(s.startedAt)}">${ago(s.startedAt)}</span></div>
+              · up <span data-tick="${esc(s.startedAt)}">…</span></div>
           </div>
           <span class="badge ${esc(s.state)}">${esc(s.state.replace('-',' '))}</span>
         </div>
@@ -433,7 +441,8 @@ function renderDeck(){
       Claude Code transcripts on this machine appear here.</div>`;
   }else{
     h+=cs.map(c=>{
-      const when=c.active?'<span style="color:var(--ok);font-weight:700">● live</span>':esc(ago(c.updatedAt))+' ago';
+      const when=c.active?'<span style="color:var(--ok);font-weight:700">● live</span>'
+        :'<span data-tick="'+esc(c.updatedAt)+'" data-suffix=" ago">…</span>';
       return `<div class="card tappable" style="border-left:3px solid ${c.active?'var(--ok)':'var(--line)'}"
           onclick="openConv('${esc(c.id)}','${esc(shortDir(c.cwd||'?'))}')">
         <div class="row">
@@ -919,8 +928,7 @@ async function refresh(){
 }
 skeletons();refresh();setInterval(refresh,4000);
 // Live tickers between polls — uptime counts feel alive.
-TICK=setInterval(()=>{document.querySelectorAll('[data-tick]').forEach(el=>{
-  el.textContent=ago(el.dataset.tick)})},1000);
+TICK=setInterval(tickPass,1000);
 </script>
 </body>
 </html>
