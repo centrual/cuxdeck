@@ -19,6 +19,23 @@ import (
 
 const serviceID = "com.centrual.cuxdeck"
 
+// serviceInstalled reports whether start-at-login is currently
+// registered, for the tray checkbox and the panel toggle.
+func serviceInstalled() bool {
+	switch runtime.GOOS {
+	case "darwin":
+		_, err := os.Stat(filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", serviceID+".plist"))
+		return err == nil
+	case "linux":
+		_, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user", "cuxdeck.service"))
+		return err == nil
+	case "windows":
+		return exec.Command("reg", "query",
+			`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`, "/v", "cuxdeck").Run() == nil
+	}
+	return false
+}
+
 func installService() error {
 	bin, err := os.Executable()
 	if err != nil {

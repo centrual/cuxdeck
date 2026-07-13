@@ -25,6 +25,7 @@ import (
 	"github.com/centrual/cuxdeck/internal/push"
 	"github.com/centrual/cuxdeck/internal/server"
 	"github.com/centrual/cuxdeck/internal/telegram"
+	"github.com/centrual/cuxdeck/internal/tray"
 	"github.com/centrual/cuxdeck/internal/tunnel"
 	"github.com/centrual/cuxdeck/internal/usagelog"
 	"github.com/centrual/cuxdeck/internal/watch"
@@ -72,6 +73,7 @@ func main() {
 
 	port := flag.Int("port", 8447, "local port (127.0.0.1 only)")
 	noTunnel := flag.Bool("no-tunnel", false, "serve locally without the public tunnel")
+	noTray := flag.Bool("no-tray", false, "run headless, without the menu-bar icon")
 	flag.Parse()
 
 	st, err := auth.Open(home())
@@ -80,6 +82,37 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The menu-bar icon owns the main thread, so the daemon runs inside
+	// its ready callback. --no-tray (or a build without a GUI session)
+	// falls back to a plain headless daemon.
+	daemon := func() { runDaemon(st, *port, *noTunnel) }
+	if *noTray {
+		daemon()
+		return
+	}
+	base := func() string {
+		if b, err := os.ReadFile(filepath.Join(home(), "current-url")); err == nil && len(b) > 0 {
+			return string(b)
+		}
+		return fmt.Sprintf("http://127.0.0.1:%d", *port)
+	}
+	tray.Run(tray.Deps{
+		CurrentURL:        base,
+		PairingLink:       func() string { return base() + "/#p=" + st.NewPairingCode(auth.RoleControl) },
+		StartAtLoginState: serviceInstalled,
+		SetStartAtLogin: func(on bool) error {
+			if on {
+				return installService()
+			}
+			return uninstallService()
+		},
+		OnQuit: func() { os.Exit(0) },
+	}, daemon)
+}
+
+// runDaemon is the server + tunnel loop, extracted so the tray can own
+// the main goroutine and start it in its ready callback.
+func runDaemon(st *auth.Store, port int, noTunnel bool) {
 	// Alerts: Web Push (VAPID keypair + local subs) and Telegram (bot
 	// token + chat id). A single watcher fans cux state changes out to
 	// whichever channels are enabled. All best-effort — if a channel
@@ -99,7 +132,7 @@ func main() {
 	go watch.Run(notifiers, 5*time.Second)
 
 	srv := &server.Server{Auth: st, Push: pushStore, TG: tgStore, Usage: usageStore, Version: version}
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cuxdeck:", err)
 		os.Exit(1)
@@ -110,19 +143,19 @@ func main() {
 			os.Exit(1)
 		}
 	}()
-	fmt.Printf("⌁ cuxdeck %s — serving on http://127.0.0.1:%d\n", version, *port)
+	fmt.Printf("⌁ cuxdeck %s — serving on http://127.0.0.1:%d\n", version, port)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if *noTunnel {
-		showPairing(st, fmt.Sprintf("http://127.0.0.1:%d", *port))
+	if noTunnel {
+		showPairing(st, fmt.Sprintf("http://127.0.0.1:%d", port))
 		<-ctx.Done()
 		return
 	}
 
 	tm := &tunnel.Manager{
-		LocalPort: *port,
+		LocalPort: port,
 		Dir:       filepath.Join(home(), "bin"),
 		Logf: func(f string, a ...any) {
 			fmt.Printf("cuxdeck: "+f+"\n", a...)
@@ -143,7 +176,7 @@ func main() {
 	if err := tm.EnsureBinary(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "cuxdeck: tunnel unavailable:", err)
 		fmt.Println("cuxdeck: continuing local-only; pair on this machine's browser:")
-		showPairing(st, fmt.Sprintf("http://127.0.0.1:%d", *port))
+		showPairing(st, fmt.Sprintf("http://127.0.0.1:%d", port))
 		<-ctx.Done()
 		return
 	}
