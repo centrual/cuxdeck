@@ -96,8 +96,12 @@ party who can see your data. If a step can be removed, it will be.
 **macOS — Homebrew** (menu-bar app):
 
 ```
-brew install --cask centrual/tap/cuxdeck
+brew tap centrual/tap
+brew install --cask cuxdeck
 ```
+
+Recent Homebrew guards third-party taps, so the first install may ask you to
+trust it — run `brew trust centrual/tap` (or the command it prints) and re-run.
 
 **macOS — direct**: grab `cuxdeck-<version>-darwin-universal.dmg` from the
 [latest release](https://github.com/centrual/cuxdeck/releases/latest), open it,
