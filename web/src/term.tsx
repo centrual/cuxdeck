@@ -3,7 +3,7 @@
 // works here: typing, Enter, Ctrl+C, arrows. A quick-key bar covers
 // what mobile keyboards can't type.
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { TOK } from "./api";
@@ -23,9 +23,64 @@ const QUICK: Array<[string, string]> = [
   ["↑", "\x1b[A"], ["↓", "\x1b[B"], ["←", "\x1b[D"], ["→", "\x1b[C"], ["⏎", "\r"],
 ];
 
+const BAR_H = 44; // .qkeys height when visible (padding + button height)
+
+/* Tracks the on-screen keyboard via visualViewport: how far the
+   layout viewport's bottom edge sits above the visible one is the
+   keyboard height. iOS Safari keeps `position:fixed` pinned to the
+   layout viewport, so callers use this to lift the quick-key bar
+   above the keyboard instead of letting it hide underneath. */
+function useKeyboardHeight(): number {
+  const [h, setH] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const gap = window.innerHeight - vv.height - vv.offsetTop;
+      setH(gap > 60 ? gap : 0); // ignore noise (address bar show/hide, rotation)
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => { vv.removeEventListener("resize", update); vv.removeEventListener("scroll", update); };
+  }, []);
+  return h;
+}
+
 export function Term({ pid, title, onClose }: { pid: number; title: string; onClose: () => void }) {
   const holder = useRef<HTMLDivElement>(null);
+  const head = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const reflowRef = useRef<() => void>(() => {});
+  const kbHeight = useKeyboardHeight();
+  // The bar behaves like an input accessory view: invisible until the
+  // terminal is focused, then docked above the on-screen keyboard on
+  // mobile (kbHeight > 0) or flush to the bottom edge on desktop
+  // (kbHeight === 0, no keyboard to cover it) — one signal drives both
+  // "should it show" and "how far up".
+  const [focused, setFocused] = useState(false);
+  const barVisible = focused || kbHeight > 0;
+
+  // Keep the terminal sized to what's actually visible: full flex
+  // height while idle, or (visualViewport − header − bar) once the
+  // bar is showing, so the last lines never end up hidden behind the
+  // keyboard or the bar sitting above it.
+  useEffect(() => {
+    if (!holder.current) return;
+    if (!barVisible) {
+      holder.current.style.flex = "1";
+      holder.current.style.height = "";
+    } else {
+      // visualViewport.height already excludes any open keyboard —
+      // it's the truly visible area, so only the header and the bar
+      // itself need to be carved out of it.
+      const vh = window.visualViewport?.height ?? window.innerHeight;
+      const headH = head.current?.offsetHeight ?? 60;
+      holder.current.style.flex = "0 0 auto";
+      holder.current.style.height = Math.max(80, vh - headH - BAR_H) + "px";
+    }
+    reflowRef.current();
+  }, [barVisible, kbHeight]);
 
   useEffect(() => {
     const term = new Terminal({
@@ -65,13 +120,25 @@ export function Term({ pid, title, onClose }: { pid: number; title: string; onCl
     term.onData((s: string) => { if (ws.readyState === WebSocket.OPEN) ws.send(frame(FRAME_INPUT, enc.encode(s))); });
 
     const onResize = () => { fit.fit(); sendResize(); };
+    reflowRef.current = onResize;
     window.addEventListener("resize", onResize);
     document.body.classList.add("chat-open");
+
+    // The bar's visibility follows real focus, not just the initial
+    // tap-to-open — xterm keeps a hidden textarea inside holder that
+    // receives all keyboard/IME input, and focus on it bubbles here.
+    const el = holder.current!;
+    const onFocusIn = () => setFocused(true);
+    const onFocusOut = () => setFocused(false);
+    el.addEventListener("focusin", onFocusIn);
+    el.addEventListener("focusout", onFocusOut);
     // Focus so the mobile keyboard comes up.
     setTimeout(() => term.focus(), 300);
 
     return () => {
       window.removeEventListener("resize", onResize);
+      el.removeEventListener("focusin", onFocusIn);
+      el.removeEventListener("focusout", onFocusOut);
       document.body.classList.remove("chat-open");
       ws.close();
       term.dispose();
@@ -85,14 +152,20 @@ export function Term({ pid, title, onClose }: { pid: number; title: string; onCl
 
   return (
     <div id="chat" className="show" style={{ background: "#0c0a09" }}>
-      <div className="chead">
+      <div className="chead" ref={head}>
         <button className="back" onClick={onClose}>‹</button>
         <div className="grow"><h2>{title}</h2><div className="sub">live terminal — full control</div></div>
       </div>
       <div ref={holder} style={{ flex: 1, minHeight: 0, padding: "6px 4px 0 8px" }} />
-      <div className="qkeys">
+      {/* Input-accessory-style bar: invisible until the terminal is
+          focused, then docked above the on-screen keyboard on mobile
+          or flush to the bottom edge on desktop. mousedown is
+          preventDefault'd so tapping a key never steals focus (and
+          closes the keyboard) away from the terminal. */}
+      <div className={"qkeys" + (barVisible ? " show" : "")}
+        style={{ "--kb-height": kbHeight + "px" } as React.CSSProperties}>
         {QUICK.map(([label, bytes]) => (
-          <button key={label} onClick={() => sendKeys(bytes)}>{label}</button>
+          <button key={label} onMouseDown={(e) => e.preventDefault()} onClick={() => sendKeys(bytes)}>{label}</button>
         ))}
       </div>
     </div>

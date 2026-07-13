@@ -521,8 +521,17 @@ body.chat-open{overflow:hidden;position:fixed;inset:0;width:100%}
 }
 
 /* ---------- terminal quick keys ---------- */
-.qkeys{display:flex;gap:6px;padding:8px 10px calc(10px + env(safe-area-inset-bottom));
-  border-top:1px solid var(--line);background:var(--bg2);overflow-x:auto;flex:none}
+/* Acts like an input accessory view: hidden while the on-screen
+   keyboard is closed, slid in to sit right above it the moment it
+   opens. `bottom` is a JS-computed keyboard height (--kb-height) —
+   fixed-position elements track the layout viewport on iOS Safari,
+   not the visual one, so without this the bar would end up hidden
+   behind the keyboard instead of above it. */
+.qkeys{position:fixed;left:0;right:0;bottom:0;z-index:46;display:flex;gap:6px;
+  padding:7px 10px;border-top:1px solid var(--line);background:var(--bg2);
+  overflow-x:auto;flex:none;
+  transform:translateY(120%);transition:transform .18s ease-out}
+.qkeys.show{transform:translateY(0);bottom:var(--kb-height, 0px)}
 .qkeys button{background:var(--card);border:1px solid var(--line);color:var(--fg);
-  border-radius:9px;padding:8px 13px;font:600 12px ui-monospace,monospace;cursor:pointer;flex:none}
+  border-radius:9px;padding:7px 12px;font:600 12px ui-monospace,monospace;cursor:pointer;flex:none}
 .qkeys button:active{background:var(--acc);color:#fff}
