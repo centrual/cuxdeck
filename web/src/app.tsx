@@ -164,6 +164,132 @@ function NavIcon({ name }: { name: string }) {
 
 /* ---------- tabs ---------- */
 
+// A directory is the unit a person thinks in — "the project I'm working
+// on" — so the deck groups by it. cux can run several seats against one
+// directory at once (project pools), and each shows up as its own
+// wrapper PID; grouping collapses those into a single project card with
+// a row per live session, instead of N cards that look like N projects.
+type ProjectGroup = {
+  dir: string;
+  sessions: Array<{ s: Session; conv?: Conv }>;
+  history: Conv[]; // transcripts here with no live session of their own
+  lastAt: number;
+};
+
+function groupByProject(sessions: Session[], convs: Conv[]): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>();
+  const get = (dir: string) => {
+    let g = groups.get(dir);
+    if (!g) { g = { dir, sessions: [], history: [], lastAt: 0 }; groups.set(dir, g); }
+    return g;
+  };
+  // Pair each live session with its transcript (by session id, else the
+  // freshest unclaimed live transcript in the same dir) so a session
+  // carries its conversation title and that transcript isn't also
+  // listed as history.
+  const claimed = new Set<string>();
+  for (const s of sessions) {
+    let c = s.sessionId ? convs.find((x) => x.id === s.sessionId) : undefined;
+    c = c || convs.find((x) => x.active && !claimed.has(x.id) && x.cwd === s.cwd);
+    if (c) claimed.add(c.id);
+    const g = get(s.cwd);
+    g.sessions.push({ s, conv: c });
+    g.lastAt = Math.max(g.lastAt, Date.parse(s.startedAt) || 0, c ? Date.parse(c.updatedAt) || 0 : 0);
+  }
+  for (const c of convs) {
+    if (claimed.has(c.id)) continue;
+    const g = get(c.cwd || "?");
+    g.history.push(c);
+    g.lastAt = Math.max(g.lastAt, Date.parse(c.updatedAt) || 0);
+  }
+  for (const g of groups.values()) g.history.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  return [...groups.values()].sort((a, b) => {
+    // Projects with a live session float up; then most-recent first.
+    if (!!a.sessions.length !== !!b.sessions.length) return a.sessions.length ? -1 : 1;
+    return b.lastAt - a.lastAt;
+  });
+}
+
+function ProjectCard({ g, onOpenConv, onOpenSession, onOpenTerm }: {
+  g: ProjectGroup;
+  onOpenConv: (c: Conv) => void; onOpenSession: (s: Session) => void; onOpenTerm: (s: Session) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const stateColor: Record<string, string> = {
+    running: "var(--ok)", "waiting-reset": "var(--warn)", retrying: "var(--bad)", swapping: "var(--info)",
+  };
+  const live = g.sessions.length;
+  const liveHistory = g.history.filter((c) => c.active); // claude running outside cux
+  const past = g.history.filter((c) => !c.active);
+  const edge = live ? "var(--ok)" : liveHistory.length ? "var(--ok)" : "var(--line)";
+
+  return (
+    <div className="card" style={{ borderLeft: "3px solid " + edge }}>
+      <div className="row">
+        <div className="grow"><h3 className="ellip">{shortDir(g.dir)}</h3>
+          <div className="sub">{live
+            ? <><b style={{ color: "var(--ok)" }}>● {live} running</b>{live > 1 ? " · " + live + " seats" : ""}</>
+            : liveHistory.length ? <b style={{ color: "var(--ok)" }}>● live (outside cux)</b>
+              : <>{g.history.length} conversation{g.history.length === 1 ? "" : "s"} · {ago(new Date(g.lastAt).toISOString())} ago</>}
+          </div>
+        </div>
+      </div>
+
+      {/* One row per live cux session: which seat, doing what, with its
+          own terminal handle. This is the 4-accounts-one-project view. */}
+      {g.sessions.map(({ s, conv }) => (
+        <div key={s.pid} className="srow tappable" onClick={() => (conv ? onOpenConv(conv) : onOpenSession(s))}>
+          <span className="dot" style={{ color: stateColor[s.state] || "var(--dim)" }}>▎</span>
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="ellip" style={{ fontWeight: 600 }}>{conv?.title || "(starting…)"}</div>
+            <div className="sub">seat <b>{s.seat ? s.seat.split("@")[0] : "—"}</b> · up {ago(s.startedAt)}
+              {s.detail ? " · ↻ " + s.detail : ""}</div>
+          </div>
+          {s.attachable && (
+            <button className="btn ghost small" style={{ flex: "none" }}
+              onClick={(e) => { e.stopPropagation(); onOpenTerm(s); }}>⌨</button>
+          )}
+        </div>
+      ))}
+
+      {/* claude running here outside cux (desktop app), if any */}
+      {liveHistory.map((c) => (
+        <div key={c.id} className="srow tappable" onClick={() => onOpenConv(c)}>
+          <span className="dot" style={{ color: "var(--ok)" }}>▎</span>
+          <div className="grow" style={{ minWidth: 0 }}>
+            <div className="ellip" style={{ fontWeight: 600 }}>{c.title || "(no messages yet)"}</div>
+            <div className="sub">not managed by cux · ● live</div>
+          </div>
+        </div>
+      ))}
+
+      {/* history, collapsed behind a toggle so a busy directory doesn't
+          bury everything else */}
+      {past.length > 0 && (
+        <>
+          <div className="morebar" onClick={() => setOpen(!open)}>
+            {open ? "▾ hide"
+              // header already counts them when the project has no live
+              // rows, so don't repeat the number there
+              : (live || liveHistory.length)
+                ? "▸ " + past.length + " past conversation" + (past.length === 1 ? "" : "s")
+                : "▸ show conversations"}
+          </div>
+          {open && past.map((c) => (
+            <div key={c.id} className="srow tappable" onClick={() => onOpenConv(c)}>
+              <span className="dot" style={{ color: "var(--faint)" }}>▎</span>
+              <div className="grow" style={{ minWidth: 0 }}>
+                <div className="ellip">{c.title || "(no messages yet)"}</div>
+                <div className="sub">{ago(c.updatedAt)} ago</div>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
 function DeckTab({ deck, convs, onOpenSession, onOpenConv, onOpenTerm, onRefreshUsage }: {
   deck: Deck; convs: Conv[];
   onOpenSession: (s: Session) => void; onOpenConv: (c: Conv) => void;
@@ -171,79 +297,26 @@ function DeckTab({ deck, convs, onOpenSession, onOpenConv, onOpenTerm, onRefresh
 }) {
   const accts = Object.values(deck.accounts || {});
   const active = accts.find((a) => a.slot === deck.activeSlot);
-  const stateColor: Record<string, string> = {
-    running: "var(--ok)", "waiting-reset": "var(--warn)", retrying: "var(--bad)", swapping: "var(--info)",
-  };
-
-  // A running cux session and its transcript are one thing, not two:
-  // pair each session with its conversation (by session id when the
-  // registry has it, else the freshest unclaimed live transcript in
-  // the same directory). The session card then carries the
-  // conversation's title, and the paired transcript disappears from
-  // the list below — no more seeing yourself twice.
-  const claimed = new Set<string>();
-  const convFor = (s: Session): Conv | undefined => {
-    let c = s.sessionId ? convs.find((x) => x.id === s.sessionId) : undefined;
-    c = c || convs.find((x) => x.active && !claimed.has(x.id) && x.cwd === s.cwd);
-    if (c) claimed.add(c.id);
-    return c;
-  };
-  const paired = (deck.sessions || []).map((s) => ({ s, conv: convFor(s) }));
-  const restConvs = convs.filter((c) => !claimed.has(c.id));
+  const groups = groupByProject(deck.sessions || [], convs);
+  const activeCount = (deck.sessions || []).length;
 
   return (
     <>
-      <div className="section-label">Live sessions</div>
-      {!deck.sessions?.length && (
+      <div className="section-label">Projects</div>
+      {!groups.length && (
         <div className="card empty"><div className="art">🌙</div><b>All quiet</b>
-          No cux sessions right now.<br />Start one with <span className="mono">cux</span> on {deck.hostname}.</div>
+          No sessions or conversations yet.<br />Start one with <span className="mono">cux</span> on {deck.hostname}.</div>
       )}
-      {paired.map(({ s, conv }) => (
-        <div key={s.pid} className="card tappable" style={{ borderLeft: "3px solid " + (stateColor[s.state] || "var(--dim)") }}
-          onClick={() => (conv ? onOpenConv(conv) : onOpenSession(s))}>
-          <div className="row">
-            <div className="grow">
-              <h3 className="ellip">{conv?.title || shortDir(s.cwd)}</h3>
-              <div className="sub ellip">{shortDir(s.cwd)} · seat <b>{s.seat ? s.seat.split("@")[0] : "—"}</b> · up {ago(s.startedAt)}</div>
-            </div>
-            <span className={"badge " + s.state}>{s.state.replace("-", " ")}</span>
-          </div>
-          {s.detail && <div className="sub" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--line)" }}>↻ {s.detail}</div>}
-          <div className="row" style={{ marginTop: 8, gap: 14 }}>
-            <span className="sub" style={{ color: "var(--acc)", fontWeight: 700 }}>conversation ›</span>
-            {s.attachable && (
-              <span className="sub" style={{ color: "var(--ok)", fontWeight: 700 }}
-                onClick={(e) => { e.stopPropagation(); onOpenTerm(s); }}>⌨ terminal ›</span>
-            )}
-          </div>
-        </div>
-      ))}
-
-      {/* whatever a live session didn't claim: history, plus any claude
-          running outside cux (desktop app tabs) whose transcript is
-          still being written — those keep their ● live dot here. */}
-      <div className="section-label">Other conversations</div>
-      {!restConvs.length && (
-        <div className="card empty"><div className="art">💬</div><b>No conversations yet</b>
-          Claude Code transcripts on this machine appear here.</div>
-      )}
-      {restConvs.map((c) => (
-        <div key={c.id} className="card tappable" style={{ borderLeft: "3px solid " + (c.active ? "var(--ok)" : "var(--line)") }}
-          onClick={() => onOpenConv(c)}>
-          <div className="row"><div className="grow">
-            <h3 className="ellip">{c.title || "(no messages yet)"}</h3>
-            <div className="sub ellip">{shortDir(c.cwd || "?")} · {c.active
-              ? <span style={{ color: "var(--ok)", fontWeight: 700 }}>● live</span>
-              : ago(c.updatedAt) + " ago"}</div>
-          </div></div>
-        </div>
+      {groups.map((g) => (
+        <ProjectCard key={g.dir} g={g}
+          onOpenConv={onOpenConv} onOpenSession={onOpenSession} onOpenTerm={onOpenTerm} />
       ))}
 
       <div className="section-label">This machine</div>
       <div className="card"><div className="row">
         <div className="grow">
           <h3>{deck.hostname}</h3>
-          <div className="sub">{accts.length} seat{accts.length === 1 ? "" : "s"} · active: <b>{active ? seatLabel(active) : "—"}</b> · {deck.os}</div>
+          <div className="sub">{activeCount} live session{activeCount === 1 ? "" : "s"} · {accts.length} seat{accts.length === 1 ? "" : "s"} · active: <b>{active ? seatLabel(active) : "—"}</b></div>
         </div>
         <button className="btn ghost small" onClick={onRefreshUsage}>↻ refresh</button>
       </div></div>

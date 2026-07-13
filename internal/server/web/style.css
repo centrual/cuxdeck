@@ -536,3 +536,13 @@ body.chat-open{overflow:hidden;position:fixed;inset:0;width:100%}
 .qkeys button{background:var(--card);border:1px solid var(--line);color:var(--fg);
   border-radius:9px;padding:7px 12px;font:600 12px ui-monospace,monospace;cursor:pointer;flex:none}
 .qkeys button:active{background:var(--acc);color:#fff}
+
+/* ---------- project card rows ---------- */
+.srow{display:flex;align-items:center;gap:8px;padding:9px 2px;margin-top:2px;
+  border-top:1px solid var(--line)}
+.srow:active{opacity:.7}
+.srow .dot{flex:none;font-size:15px;line-height:1}
+.srow .sub{font-size:11.5px}
+.morebar{margin-top:8px;padding-top:9px;border-top:1px solid var(--line);
+  font-size:12px;color:var(--faint);font-weight:600;cursor:pointer}
+.morebar:active{color:var(--fg)}
