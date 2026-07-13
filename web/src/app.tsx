@@ -4,10 +4,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, deviceName, setToken, setUnauthorizedHandler, TOK } from "./api";
 import { Chat } from "./chat";
+import { Term } from "./term";
 import { ago, inTime, shortDir } from "./util";
 
 /* ---------- server shapes ---------- */
-type Session = { pid: number; cwd: string; sessionId?: string; seat?: string; state: string; detail?: string; startedAt: string };
+type Session = { pid: number; cwd: string; sessionId?: string; seat?: string; state: string; detail?: string; startedAt: string; attachable?: boolean };
 type Account = { email: string; alias?: string; slot: number; uuid?: string; orgUuid?: string };
 type Usage = { five_hour?: Win; seven_day?: Win; token_expired?: boolean };
 type Win = { utilization: number; resets_at?: string };
@@ -60,6 +61,7 @@ export default function App() {
   const [online, setOnline] = useState(true);
   const [tab, setTab] = useState<"deck" | "seats" | "projects" | "settings">("deck");
   const [chat, setChat] = useState<{ url: string; title: string; sub: string } | null>(null);
+  const [termSess, setTermSess] = useState<{ pid: number; title: string } | null>(null);
   const [sheet, setSheet] = useState<React.ReactNode | null>(null);
   const [toastMsg, setToastMsg] = useState("");
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
@@ -112,6 +114,7 @@ export default function App() {
           <DeckTab deck={deck} convs={convs}
             onOpenSession={(s) => setChat({ url: "/api/session/" + s.pid + "/chat", title: shortDir(s.cwd), sub: "seat " + (s.seat ? s.seat.split("@")[0] : "—") })}
             onOpenConv={(c) => setChat({ url: "/api/conversation/" + c.id + "/chat", title: shortDir(c.cwd || "?"), sub: "" })}
+            onOpenTerm={(s) => setTermSess({ pid: s.pid, title: shortDir(s.cwd) })}
             onRefreshUsage={() => act("usage-refresh", {}, "Refreshing usage…")} />
         )}
         {deck && tab === "seats" && (
@@ -143,6 +146,7 @@ export default function App() {
       <div id="veil" className={sheet ? "show" : ""} onClick={() => setSheet(null)} />
       <div id="sheet" className={sheet ? "show" : ""}><div className="grip" />{sheet}</div>
       {chat && <Chat url={chat.url} title={chat.title} sub={chat.sub} onClose={() => setChat(null)} />}
+      {termSess && <Term pid={termSess.pid} title={termSess.title} onClose={() => setTermSess(null)} />}
       <div id="toast" className={toastMsg ? "show" : ""}>{toastMsg}</div>
     </>
   );
@@ -160,9 +164,10 @@ function NavIcon({ name }: { name: string }) {
 
 /* ---------- tabs ---------- */
 
-function DeckTab({ deck, convs, onOpenSession, onOpenConv, onRefreshUsage }: {
+function DeckTab({ deck, convs, onOpenSession, onOpenConv, onOpenTerm, onRefreshUsage }: {
   deck: Deck; convs: Conv[];
-  onOpenSession: (s: Session) => void; onOpenConv: (c: Conv) => void; onRefreshUsage: () => void;
+  onOpenSession: (s: Session) => void; onOpenConv: (c: Conv) => void;
+  onOpenTerm: (s: Session) => void; onRefreshUsage: () => void;
 }) {
   const accts = Object.values(deck.accounts || {});
   const active = accts.find((a) => a.slot === deck.activeSlot);
@@ -187,7 +192,13 @@ function DeckTab({ deck, convs, onOpenSession, onOpenConv, onRefreshUsage }: {
             <span className={"badge " + s.state}>{s.state.replace("-", " ")}</span>
           </div>
           {s.detail && <div className="sub" style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--line)" }}>↻ {s.detail}</div>}
-          <div className="sub" style={{ marginTop: 8, color: "var(--acc)", fontWeight: 700 }}>open conversation ›</div>
+          <div className="row" style={{ marginTop: 8, gap: 14 }}>
+            <span className="sub" style={{ color: "var(--acc)", fontWeight: 700 }}>conversation ›</span>
+            {s.attachable && (
+              <span className="sub" style={{ color: "var(--ok)", fontWeight: 700 }}
+                onClick={(e) => { e.stopPropagation(); onOpenTerm(s); }}>⌨ terminal ›</span>
+            )}
+          </div>
         </div>
       ))}
 

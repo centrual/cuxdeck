@@ -88,14 +88,15 @@ func LoadUsage() map[string]AccountUsage {
 
 // Session is one running cux wrapper, from the heartbeat registry.
 type Session struct {
-	PID       int       `json:"pid"`
-	CWD       string    `json:"cwd"`
-	SessionID string    `json:"sessionId,omitempty"`
-	Seat      string    `json:"seat,omitempty"`
-	State     string    `json:"state"`
-	Detail    string    `json:"detail,omitempty"`
-	StartedAt time.Time `json:"startedAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	PID        int       `json:"pid"`
+	CWD        string    `json:"cwd"`
+	SessionID  string    `json:"sessionId,omitempty"`
+	Seat       string    `json:"seat,omitempty"`
+	State      string    `json:"state"`
+	Attachable bool      `json:"attachable,omitempty"`
+	Detail     string    `json:"detail,omitempty"`
+	StartedAt  time.Time `json:"startedAt"`
+	UpdatedAt  time.Time `json:"updatedAt"`
 }
 
 func LoadSessions() []Session {

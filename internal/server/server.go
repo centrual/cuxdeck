@@ -38,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/session/{pid}/chat", s.authed(s.chatStream))
 	mux.HandleFunc("GET /api/conversations", s.authed(s.conversations))
 	mux.HandleFunc("GET /api/conversation/{id}/chat", s.authed(s.conversationChat))
+	mux.HandleFunc("GET /api/session/{pid}/term", s.authed(s.termBridge))
 	mux.HandleFunc("GET /api/devices", s.authed(s.devices))
 	mux.HandleFunc("POST /api/devices/revoke", s.authed(s.revoke))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
