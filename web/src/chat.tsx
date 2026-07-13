@@ -5,7 +5,8 @@
 // bottom. Fed by the server's SSE stream (backlog → caught-up → tail).
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { TOK } from "./api";
+import { sseURL } from "./api";
+import type { Deck } from "./decks";
 import { firstln, fmtDur, fmtTok, md } from "./util";
 
 type Ev = {
@@ -289,7 +290,9 @@ function statusLine(st: Stream, now: number): { line: string; busy: boolean } {
   return { line: "Working… (" + (turn || fmtDur(idle)) + tok + ")", busy: true };
 }
 
-export function Chat({ url, title, sub, onClose }: { url: string; title: string; sub: string; onClose: () => void }) {
+export function Chat({ deck, path, title, sub, onClose }: {
+  deck: Deck; path: string; title: string; sub: string; onClose: () => void;
+}) {
   const streamRef = useRef<Stream>(newStream());
   const [, setTick] = useState(0); // flush counter — the stream ref holds the data
   const [now, setNow] = useState(Date.now());
@@ -298,7 +301,7 @@ export function Chat({ url, title, sub, onClose }: { url: string; title: string;
 
   useEffect(() => {
     streamRef.current = newStream();
-    const es = new EventSource(url + "?token=" + encodeURIComponent(TOK));
+    const es = new EventSource(sseURL(deck, path));
     let got = false;
     // A reconnect replays the whole transcript; start the render over so
     // nothing shows up twice.
@@ -320,7 +323,7 @@ export function Chat({ url, title, sub, onClose }: { url: string; title: string;
       document.body.classList.remove("chat-open");
       window.scrollTo(0, scrollY);
     };
-  }, [url]);
+  }, [deck.url, path]);
 
   useLayoutEffect(() => {
     const log = logRef.current;

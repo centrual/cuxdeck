@@ -546,3 +546,12 @@ body.chat-open{overflow:hidden;position:fixed;inset:0;width:100%}
 .morebar{margin-top:8px;padding-top:9px;border-top:1px solid var(--line);
   font-size:12px;color:var(--faint);font-weight:600;cursor:pointer}
 .morebar:active{color:var(--fg)}
+
+/* ---------- fleet: per-machine section headers ---------- */
+.mhead{display:flex;align-items:center;gap:8px;margin:14px 4px 2px}
+.mhead .mdot{width:9px;height:9px;border-radius:50%;background:var(--ok);flex:none;
+  box-shadow:0 0 0 0 #34d39966;animation:pulse 2.2s infinite}
+.mhead .mdot.off{background:var(--faint);box-shadow:none;animation:none}
+.mhead .mname{font-weight:800;font-size:14px;letter-spacing:-.2px}
+.mhead .msub{font-size:11px;color:var(--faint);margin-left:auto}
+.mhead .moff{font-size:11px;color:var(--bad);font-weight:600}

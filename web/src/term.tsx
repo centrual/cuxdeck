@@ -6,7 +6,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { TOK } from "./api";
+import { wsURL } from "./api";
+import type { Deck } from "./decks";
 
 const FRAME_OUT = 0, FRAME_INPUT = 1, FRAME_RESIZE = 2;
 
@@ -47,7 +48,7 @@ function useKeyboardHeight(): number {
   return h;
 }
 
-export function Term({ pid, title, onClose }: { pid: number; title: string; onClose: () => void }) {
+export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; title: string; onClose: () => void }) {
   const holder = useRef<HTMLDivElement>(null);
   const head = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -92,8 +93,7 @@ export function Term({ pid, title, onClose }: { pid: number; title: string; onCl
     term.open(holder.current!);
     fit.fit();
 
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(proto + "//" + location.host + "/api/session/" + pid + "/term?token=" + encodeURIComponent(TOK));
+    const ws = new WebSocket(wsURL(deck, "/api/session/" + pid + "/term", deck.token));
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
     const enc = new TextEncoder();
@@ -131,7 +131,7 @@ export function Term({ pid, title, onClose }: { pid: number; title: string; onCl
       ws.close();
       term.dispose();
     };
-  }, [pid]);
+  }, [deck.url, pid]);
 
   const sendKeys = (bytes: string) => {
     const ws = wsRef.current;

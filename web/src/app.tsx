@@ -1,19 +1,22 @@
-// cuxdeck panel — React root. Tabs (Deck / Seats / Projects / Settings),
-// device pairing, bottom sheets and the live conversation overlay.
+// cuxdeck panel — React root. The fleet is assembled here in the
+// browser: a list of decks (machines), each fetched directly over its
+// own tunnel with its own token, then shown together. One machine
+// renders flat; several render under per-machine headers.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, deviceName, setToken, setUnauthorizedHandler, TOK } from "./api";
+import { api, deviceName, pair, setUnauthorizedHandler } from "./api";
+import { getDecks, hasDecks, noteDeckMeta, parsePairLink, removeDeck, upsertDeck, type Deck } from "./decks";
 import { Chat } from "./chat";
 import { Term } from "./term";
 import { ago, inTime, shortDir } from "./util";
 
-/* ---------- server shapes ---------- */
+/* ---------- server shapes (one machine's snapshot) ---------- */
 type Session = { pid: number; cwd: string; sessionId?: string; seat?: string; state: string; detail?: string; startedAt: string; attachable?: boolean };
 type Account = { email: string; alias?: string; slot: number; uuid?: string; orgUuid?: string };
 type Usage = { five_hour?: Win; seven_day?: Win; token_expired?: boolean };
 type Win = { utilization: number; resets_at?: string };
 type Project = { name: string; dir: string; slots?: number[] };
-type Deck = {
+type Snapshot = {
   deckId: string; hostname: string; os: string; version: string;
   sessions: Session[]; accounts: Record<string, Account>;
   usage: Record<string, Usage>; projects?: Record<string, Project>; activeSlot: number;
@@ -21,11 +24,14 @@ type Deck = {
 type Conv = { id: string; cwd: string; title: string; updatedAt: string; active: boolean };
 type Device = { id: string; name: string; createdAt: string; lastSeen: string };
 
+// One machine's live state: the connection, its latest snapshot and
+// conversations, and whether the last fetch reached it.
+type Entry = { deck: Deck; snap: Snapshot | null; convs: Conv[]; online: boolean };
+
 const cacheKey = (a: Account) => (a.uuid && a.orgUuid ? a.uuid + "|" + a.orgUuid : a.orgUuid || a.email);
 const seatLabel = (a: Account) => a.alias || a.email.split("@")[0];
+const machineName = (e: Entry) => e.snap?.hostname || e.deck.hostname || "machine";
 
-/* Re-render once a second so relative times tick without any DOM hacks —
-   this is the whole data-tick machinery from the vanilla panel, gone. */
 function useNow(ms = 1000): number {
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), ms); return () => clearInterval(t); }, [ms]);
@@ -55,17 +61,15 @@ function Mascot({ size }: { size: number }) {
 }
 
 export default function App() {
-  const [paired, setPaired] = useState(!!TOK);
-  const [deck, setDeck] = useState<Deck | null>(null);
-  const [convs, setConvs] = useState<Conv[]>([]);
-  const [online, setOnline] = useState(true);
+  const [decks, setDecks] = useState<Deck[]>(getDecks());
+  const [fleet, setFleet] = useState<Entry[]>([]);
   const [tab, setTab] = useState<"deck" | "seats" | "projects" | "settings">("deck");
-  const [chat, setChat] = useState<{ url: string; title: string; sub: string } | null>(null);
-  const [termSess, setTermSess] = useState<{ pid: number; title: string } | null>(null);
+  const [chat, setChat] = useState<{ deck: Deck; path: string; title: string; sub: string } | null>(null);
+  const [termSess, setTermSess] = useState<{ deck: Deck; pid: number; title: string } | null>(null);
   const [sheet, setSheet] = useState<React.ReactNode | null>(null);
   const [toastMsg, setToastMsg] = useState("");
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
-  useNow(); // 1s re-render: every ago()/inTime() in the tree ticks
+  useNow();
 
   const toast = useCallback((m: string, ms = 2400) => {
     setToastMsg(m);
@@ -73,30 +77,56 @@ export default function App() {
     toastTimer.current = setTimeout(() => setToastMsg(""), ms);
   }, []);
 
-  useEffect(() => setUnauthorizedHandler(() => setPaired(false)), []);
+  // A 401 on a deck drops just that deck from the fleet (its token was
+  // revoked); the others keep working.
+  useEffect(() => setUnauthorizedHandler((d) => { removeDeck(d.id); setDecks(getDecks()); }), []);
 
   const refresh = useCallback(async () => {
-    if (!TOK) return;
-    try {
-      setDeck(await api<Deck>("/api/deck"));
-      try { setConvs((await api<Conv[]>("/api/conversations")) || []); } catch { setConvs([]); }
-      setOnline(true);
-    } catch (e) { if ((e as Error).message !== "unauthorized") setOnline(false); }
+    const ds = getDecks();
+    if (!ds.length) return;
+    const entries = await Promise.all(ds.map(async (deck): Promise<Entry> => {
+      try {
+        const snap = await api<Snapshot>(deck, "/api/deck");
+        let convs: Conv[] = [];
+        try { convs = (await api<Conv[]>(deck, "/api/conversations")) || []; } catch { /* keep deck online */ }
+        noteDeckMeta(deck.url, snap.deckId, snap.hostname);
+        return { deck, snap, convs, online: true };
+      } catch { return { deck, snap: null, convs: [], online: false }; }
+    }));
+    setFleet(entries);
+    setDecks(getDecks()); // pick up hostnames learned this round
   }, []);
 
   useEffect(() => {
     refresh();
     const t = setInterval(refresh, 4000);
     return () => clearInterval(t);
-  }, [refresh, paired]);
+  }, [refresh, decks.length]);
 
-  const act = useCallback(async (action: string, args: Record<string, string>, note: string) => {
+  const act = useCallback(async (deck: Deck, action: string, args: Record<string, string>, note: string) => {
     toast(note);
-    try { await api("/api/action", { method: "POST", body: JSON.stringify({ action, args }) }); toast("Done ✓"); refresh(); }
+    try { await api(deck, "/api/action", { method: "POST", body: JSON.stringify({ action, args }) }); toast("Done ✓"); refresh(); }
     catch (e) { toast("Failed: " + (e as Error).message, 3600); }
   }, [refresh, toast]);
 
-  if (!paired) return <Pair onPaired={() => { setPaired(true); toast("Paired — welcome aboard ⌁"); }} />;
+  const addMachine = useCallback(async (link: string) => {
+    const parsed = parsePairLink(link);
+    if (!parsed) { toast("That doesn't look like a cuxdeck link"); return; }
+    try {
+      const token = await pair(parsed.url, parsed.code, deviceName());
+      upsertDeck({ id: parsed.url || "self", url: parsed.url, token });
+      setDecks(getDecks());
+      setSheet(null);
+      toast("Machine added ⌁");
+      refresh();
+    } catch { toast("Pairing failed — the code may have expired"); }
+  }, [refresh, toast]);
+
+  if (!hasDecks()) return <Pair onPaired={() => { setDecks(getDecks()); toast("Paired — welcome aboard ⌁"); }} />;
+
+  const openChat = (deck: Deck, path: string, title: string, sub: string) => setChat({ deck, path, title, sub });
+  const anyOnline = fleet.some((e) => e.online);
+  const multi = fleet.length > 1;
 
   return (
     <>
@@ -104,36 +134,41 @@ export default function App() {
         <div className="brand">
           <div className="logo"><Mascot size={24} /></div>
           <h1 className="mono">cuxdeck<span className="cur">_</span></h1>
-          <div className="host"><span className={"pulse" + (online ? "" : " off")}></span><span>{deck?.hostname || "—"}</span></div>
+          <div className="host"><span className={"pulse" + (anyOnline ? "" : " off")}></span>
+            <span>{multi ? fleet.length + " machines" : machineName(fleet[0] || { deck: decks[0] } as Entry)}</span></div>
         </div>
       </header>
 
       <main>
-        {!deck && <><div className="skel" /><div className="skel" /><div className="skel" /></>}
-        {deck && tab === "deck" && (
-          <DeckTab deck={deck} convs={convs}
-            onOpenSession={(s) => setChat({ url: "/api/session/" + s.pid + "/chat", title: shortDir(s.cwd), sub: "seat " + (s.seat ? s.seat.split("@")[0] : "—") })}
-            onOpenConv={(c) => setChat({ url: "/api/conversation/" + c.id + "/chat", title: shortDir(c.cwd || "?"), sub: "" })}
-            onOpenTerm={(s) => setTermSess({ pid: s.pid, title: shortDir(s.cwd) })}
-            onRefreshUsage={() => act("usage-refresh", {}, "Refreshing usage…")} />
-        )}
-        {deck && tab === "seats" && (
-          <SeatsTab deck={deck} onSwitch={(a) => setSheet(
-            <ConfirmSwitch label={seatLabel(a)} onCancel={() => setSheet(null)}
-              onGo={() => { setSheet(null); act("switch", { target: String(a.slot) }, "Switching seat…"); }} />)} />
-        )}
-        {deck && tab === "projects" && (
-          <ProjectsTab deck={deck}
-            onSeats={(p) => setSheet(<SeatSheet project={p} deck={deck} toast={toast} refresh={refresh} act={act} close={() => setSheet(null)} />)} />
-        )}
-        {deck && tab === "settings" && <SettingsTab deck={deck} toast={toast} setSheet={setSheet} />}
-      </main>
+        {!fleet.length && <><div className="skel" /><div className="skel" /><div className="skel" /></>}
 
-      {tab === "projects" && (
-        <button className="btn fab" onClick={() => setSheet(
-          <ProjectSheet host={deck?.hostname || ""}
-            create={(name, dir) => { setSheet(null); act("project-create", { name, dir }, "Creating " + name + "…"); }} toast={toast} />)}>＋</button>
-      )}
+        {tab === "deck" && fleet.map((e) => (
+          <MachineBlock key={e.deck.id} e={e} showHeader={multi}
+            onOpenSession={(s) => openChat(e.deck, "/api/session/" + s.pid + "/chat", shortDir(s.cwd), "seat " + (s.seat ? s.seat.split("@")[0] : "—"))}
+            onOpenConv={(c) => openChat(e.deck, "/api/conversation/" + c.id + "/chat", shortDir(c.cwd || "?"), "")}
+            onOpenTerm={(s) => setTermSess({ deck: e.deck, pid: s.pid, title: shortDir(s.cwd) })}
+            onRefreshUsage={() => act(e.deck, "usage-refresh", {}, "Refreshing usage…")} />
+        ))}
+
+        {tab === "seats" && fleet.map((e) => (
+          <SeatsBlock key={e.deck.id} e={e} showHeader={multi}
+            onSwitch={(a) => setSheet(<ConfirmSwitch label={seatLabel(a)} onCancel={() => setSheet(null)}
+              onGo={() => { setSheet(null); act(e.deck, "switch", { target: String(a.slot) }, "Switching seat…"); }} />)} />
+        ))}
+
+        {tab === "projects" && fleet.map((e) => (
+          <ProjectsBlock key={e.deck.id} e={e} showHeader={multi}
+            onCreate={() => setSheet(<ProjectSheet host={machineName(e)} toast={toast}
+              create={(name, dir) => { setSheet(null); act(e.deck, "project-create", { name, dir }, "Creating " + name + "…"); }} />)}
+            onSeats={(p) => e.snap && setSheet(<SeatSheet project={p} snap={e.snap} deck={e.deck} toast={toast} refresh={refresh} act={act} close={() => setSheet(null)} />)} />
+        ))}
+
+        {tab === "settings" && (
+          <SettingsTab fleet={fleet} toast={toast} setSheet={setSheet}
+            onAddMachine={() => setSheet(<AddMachineSheet add={addMachine} />)}
+            onForget={(d) => { removeDeck(d.id); setDecks(getDecks()); toast("Machine forgotten"); }} />
+        )}
+      </main>
 
       <nav>
         {(["deck", "seats", "projects", "settings"] as const).map((t) => (
@@ -145,8 +180,8 @@ export default function App() {
 
       <div id="veil" className={sheet ? "show" : ""} onClick={() => setSheet(null)} />
       <div id="sheet" className={sheet ? "show" : ""}><div className="grip" />{sheet}</div>
-      {chat && <Chat url={chat.url} title={chat.title} sub={chat.sub} onClose={() => setChat(null)} />}
-      {termSess && <Term pid={termSess.pid} title={termSess.title} onClose={() => setTermSess(null)} />}
+      {chat && <Chat deck={chat.deck} path={chat.path} title={chat.title} sub={chat.sub} onClose={() => setChat(null)} />}
+      {termSess && <Term deck={termSess.deck} pid={termSess.pid} title={termSess.title} onClose={() => setTermSess(null)} />}
       <div id="toast" className={toastMsg ? "show" : ""}>{toastMsg}</div>
     </>
   );
@@ -162,19 +197,22 @@ function NavIcon({ name }: { name: string }) {
   return <svg viewBox="0 0 24 24">{paths[name]}</svg>;
 }
 
-/* ---------- tabs ---------- */
+// MachineHeader labels a machine's section in the fleet and shows
+// whether it's currently reachable.
+function MachineHeader({ e }: { e: Entry }) {
+  return (
+    <div className="mhead">
+      <span className={"mdot" + (e.online ? "" : " off")} />
+      <span className="mname">{machineName(e)}</span>
+      {!e.online && <span className="moff">unreachable</span>}
+      {e.snap && <span className="msub">{e.snap.os}</span>}
+    </div>
+  );
+}
 
-// A directory is the unit a person thinks in — "the project I'm working
-// on" — so the deck groups by it. cux can run several seats against one
-// directory at once (project pools), and each shows up as its own
-// wrapper PID; grouping collapses those into a single project card with
-// a row per live session, instead of N cards that look like N projects.
-type ProjectGroup = {
-  dir: string;
-  sessions: Array<{ s: Session; conv?: Conv }>;
-  history: Conv[]; // transcripts here with no live session of their own
-  lastAt: number;
-};
+/* ---------- project grouping (per machine) ---------- */
+
+type ProjectGroup = { dir: string; sessions: Array<{ s: Session; conv?: Conv }>; history: Conv[]; lastAt: number };
 
 function groupByProject(sessions: Session[], convs: Conv[]): ProjectGroup[] {
   const groups = new Map<string, ProjectGroup>();
@@ -183,10 +221,6 @@ function groupByProject(sessions: Session[], convs: Conv[]): ProjectGroup[] {
     if (!g) { g = { dir, sessions: [], history: [], lastAt: 0 }; groups.set(dir, g); }
     return g;
   };
-  // Pair each live session with its transcript (by session id, else the
-  // freshest unclaimed live transcript in the same dir) so a session
-  // carries its conversation title and that transcript isn't also
-  // listed as history.
   const claimed = new Set<string>();
   for (const s of sessions) {
     let c = s.sessionId ? convs.find((x) => x.id === s.sessionId) : undefined;
@@ -204,7 +238,6 @@ function groupByProject(sessions: Session[], convs: Conv[]): ProjectGroup[] {
   }
   for (const g of groups.values()) g.history.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
   return [...groups.values()].sort((a, b) => {
-    // Projects with a live session float up; then most-recent first.
     if (!!a.sessions.length !== !!b.sessions.length) return a.sessions.length ? -1 : 1;
     return b.lastAt - a.lastAt;
   });
@@ -219,9 +252,9 @@ function ProjectCard({ g, onOpenConv, onOpenSession, onOpenTerm }: {
     running: "var(--ok)", "waiting-reset": "var(--warn)", retrying: "var(--bad)", swapping: "var(--info)",
   };
   const live = g.sessions.length;
-  const liveHistory = g.history.filter((c) => c.active); // claude running outside cux
+  const liveHistory = g.history.filter((c) => c.active);
   const past = g.history.filter((c) => !c.active);
-  const edge = live ? "var(--ok)" : liveHistory.length ? "var(--ok)" : "var(--line)";
+  const edge = live || liveHistory.length ? "var(--ok)" : "var(--line)";
 
   return (
     <div className="card" style={{ borderLeft: "3px solid " + edge }}>
@@ -235,8 +268,6 @@ function ProjectCard({ g, onOpenConv, onOpenSession, onOpenTerm }: {
         </div>
       </div>
 
-      {/* One row per live cux session: which seat, doing what, with its
-          own terminal handle. This is the 4-accounts-one-project view. */}
       {g.sessions.map(({ s, conv }) => (
         <div key={s.pid} className="srow tappable" onClick={() => (conv ? onOpenConv(conv) : onOpenSession(s))}>
           <span className="dot" style={{ color: stateColor[s.state] || "var(--dim)" }}>▎</span>
@@ -247,12 +278,11 @@ function ProjectCard({ g, onOpenConv, onOpenSession, onOpenTerm }: {
           </div>
           {s.attachable && (
             <button className="btn ghost small" style={{ flex: "none" }}
-              onClick={(e) => { e.stopPropagation(); onOpenTerm(s); }}>⌨</button>
+              onClick={(ev) => { ev.stopPropagation(); onOpenTerm(s); }}>⌨</button>
           )}
         </div>
       ))}
 
-      {/* claude running here outside cux (desktop app), if any */}
       {liveHistory.map((c) => (
         <div key={c.id} className="srow tappable" onClick={() => onOpenConv(c)}>
           <span className="dot" style={{ color: "var(--ok)" }}>▎</span>
@@ -263,14 +293,10 @@ function ProjectCard({ g, onOpenConv, onOpenSession, onOpenTerm }: {
         </div>
       ))}
 
-      {/* history, collapsed behind a toggle so a busy directory doesn't
-          bury everything else */}
       {past.length > 0 && (
         <>
           <div className="morebar" onClick={() => setOpen(!open)}>
             {open ? "▾ hide"
-              // header already counts them when the project has no live
-              // rows, so don't repeat the number there
               : (live || liveHistory.length)
                 ? "▸ " + past.length + " past conversation" + (past.length === 1 ? "" : "s")
                 : "▸ show conversations"}
@@ -290,51 +316,64 @@ function ProjectCard({ g, onOpenConv, onOpenSession, onOpenTerm }: {
   );
 }
 
-function DeckTab({ deck, convs, onOpenSession, onOpenConv, onOpenTerm, onRefreshUsage }: {
-  deck: Deck; convs: Conv[];
-  onOpenSession: (s: Session) => void; onOpenConv: (c: Conv) => void;
-  onOpenTerm: (s: Session) => void; onRefreshUsage: () => void;
-}) {
-  const accts = Object.values(deck.accounts || {});
-  const active = accts.find((a) => a.slot === deck.activeSlot);
-  const groups = groupByProject(deck.sessions || [], convs);
-  const activeCount = (deck.sessions || []).length;
+/* ---------- per-machine tab blocks ---------- */
 
+function MachineBlock({ e, showHeader, onOpenSession, onOpenConv, onOpenTerm, onRefreshUsage }: {
+  e: Entry; showHeader: boolean;
+  onOpenSession: (s: Session) => void; onOpenConv: (c: Conv) => void; onOpenTerm: (s: Session) => void; onRefreshUsage: () => void;
+}) {
+  const snap = e.snap;
+  const groups = snap ? groupByProject(snap.sessions || [], e.convs) : [];
   return (
     <>
-      <div className="section-label">Projects</div>
-      {!groups.length && (
+      {showHeader ? <MachineHeader e={e} /> : <div className="section-label">Projects</div>}
+      {!e.online && <div className="card empty"><div className="art">📡</div><b>Unreachable</b>
+        This machine's tunnel is down or it's offline.</div>}
+      {e.online && !groups.length && (
         <div className="card empty"><div className="art">🌙</div><b>All quiet</b>
-          No sessions or conversations yet.<br />Start one with <span className="mono">cux</span> on {deck.hostname}.</div>
+          No sessions or conversations yet.</div>
       )}
       {groups.map((g) => (
-        <ProjectCard key={g.dir} g={g}
-          onOpenConv={onOpenConv} onOpenSession={onOpenSession} onOpenTerm={onOpenTerm} />
+        <ProjectCard key={g.dir} g={g} onOpenConv={onOpenConv} onOpenSession={onOpenSession} onOpenTerm={onOpenTerm} />
       ))}
-
-      <div className="section-label">This machine</div>
-      <div className="card"><div className="row">
-        <div className="grow">
-          <h3>{deck.hostname}</h3>
-          <div className="sub">{activeCount} live session{activeCount === 1 ? "" : "s"} · {accts.length} seat{accts.length === 1 ? "" : "s"} · active: <b>{active ? seatLabel(active) : "—"}</b></div>
-        </div>
-        <button className="btn ghost small" onClick={onRefreshUsage}>↻ refresh</button>
-      </div></div>
+      {snap && !showHeader && (
+        <>
+          <div className="section-label">This machine</div>
+          <MachineFooter snap={snap} onRefreshUsage={onRefreshUsage} />
+        </>
+      )}
     </>
   );
 }
 
-function SeatsTab({ deck, onSwitch }: { deck: Deck; onSwitch: (a: Account) => void }) {
-  const accts = Object.values(deck.accounts || {}).sort((a, b) => a.slot - b.slot);
-  if (!accts.length) return (
-    <div className="card empty"><div className="art">🪑</div><b>No seats yet</b>
-      Log in and run <span className="mono">cux add</span> on the computer.</div>
+function MachineFooter({ snap, onRefreshUsage }: { snap: Snapshot; onRefreshUsage: () => void }) {
+  const accts = Object.values(snap.accounts || {});
+  const active = accts.find((a) => a.slot === snap.activeSlot);
+  const n = (snap.sessions || []).length;
+  return (
+    <div className="card"><div className="row">
+      <div className="grow">
+        <h3>{snap.hostname}</h3>
+        <div className="sub">{n} live session{n === 1 ? "" : "s"} · {accts.length} seat{accts.length === 1 ? "" : "s"} · active: <b>{active ? seatLabel(active) : "—"}</b></div>
+      </div>
+      <button className="btn ghost small" onClick={onRefreshUsage}>↻ refresh</button>
+    </div></div>
   );
+}
+
+function SeatsBlock({ e, showHeader, onSwitch }: { e: Entry; showHeader: boolean; onSwitch: (a: Account) => void }) {
+  const snap = e.snap;
+  const accts = snap ? Object.values(snap.accounts || {}).sort((a, b) => a.slot - b.slot) : [];
   return (
     <>
-      <div className="section-label">Seats</div>
-      {accts.map((a) => {
-        const u = (deck.usage || {})[cacheKey(a)];
+      {showHeader ? <MachineHeader e={e} /> : <div className="section-label">Seats</div>}
+      {!e.online && <div className="card empty"><div className="art">📡</div><b>Unreachable</b></div>}
+      {e.online && !accts.length && (
+        <div className="card empty"><div className="art">🪑</div><b>No seats yet</b>
+          Log in and run <span className="mono">cux add</span> on the computer.</div>
+      )}
+      {snap && accts.map((a) => {
+        const u = (snap.usage || {})[cacheKey(a)];
         const f = u?.five_hour?.utilization ?? null, d7 = u?.seven_day?.utilization ?? null;
         const resets = ([[u?.five_hour, "5h"], [u?.seven_day, "7d"]] as const)
           .filter(([w]) => w && w.utilization >= 90 && w.resets_at)
@@ -346,7 +385,7 @@ function SeatsTab({ deck, onSwitch }: { deck: Deck; onSwitch: (a: Account) => vo
                 <h3 className="ellip">{seatLabel(a)}</h3>
                 <div className="sub ellip">{a.email} · slot {a.slot}</div>
               </div>
-              {a.slot === deck.activeSlot
+              {a.slot === snap.activeSlot
                 ? <span className="badge active">active</span>
                 : <button className="btn ghost small" onClick={() => onSwitch(a)}>switch</button>}
             </div>
@@ -366,16 +405,23 @@ function SeatsTab({ deck, onSwitch }: { deck: Deck; onSwitch: (a: Account) => vo
   );
 }
 
-function ProjectsTab({ deck, onSeats }: { deck: Deck; onSeats: (p: Project) => void }) {
-  const ps = Object.values(deck.projects || {}).sort((a, b) => a.name.localeCompare(b.name));
-  if (!ps.length) return (
-    <div className="card empty"><div className="art">📁</div><b>No projects</b>
-      Projects pin a directory to chosen seats.<br />Tap ＋ to create your first.</div>
-  );
+function ProjectsBlock({ e, showHeader, onSeats, onCreate }: {
+  e: Entry; showHeader: boolean; onSeats: (p: Project) => void; onCreate: () => void;
+}) {
+  const snap = e.snap;
+  const ps = snap ? Object.values(snap.projects || {}).sort((a, b) => a.name.localeCompare(b.name)) : [];
   return (
     <>
-      <div className="section-label">Projects</div>
-      {ps.map((p) => (
+      <div className="row" style={{ alignItems: "center" }}>
+        {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>Projects</div>}
+        {e.online && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onCreate}>＋ new</button>}
+      </div>
+      {!e.online && <div className="card empty"><div className="art">📡</div><b>Unreachable</b></div>}
+      {e.online && !ps.length && (
+        <div className="card empty"><div className="art">📁</div><b>No projects</b>
+          Pin a directory to chosen seats with ＋ new.</div>
+      )}
+      {snap && ps.map((p) => (
         <div key={p.name} className="card">
           <div className="row">
             <div className="grow"><h3>{p.name}</h3>
@@ -385,7 +431,7 @@ function ProjectsTab({ deck, onSeats }: { deck: Deck; onSeats: (p: Project) => v
           <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             {(p.slots || []).length
               ? p.slots!.map((sl) => {
-                const a = (deck.accounts || {})[sl];
+                const a = (snap.accounts || {})[sl];
                 return <span key={sl} className="badge active" style={{ textTransform: "none" }}>{a ? seatLabel(a) : "#" + sl}</span>;
               })
               : <span className="sub">no seats pinned — full pool applies</span>}
@@ -396,20 +442,52 @@ function ProjectsTab({ deck, onSeats }: { deck: Deck; onSeats: (p: Project) => v
   );
 }
 
-function SettingsTab({ deck, toast, setSheet }: {
-  deck: Deck; toast: (m: string, ms?: number) => void; setSheet: (n: React.ReactNode | null) => void;
+function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
+  fleet: Entry[]; toast: (m: string, ms?: number) => void; setSheet: (n: React.ReactNode | null) => void;
+  onAddMachine: () => void; onForget: (d: Deck) => void;
+}) {
+  return (
+    <>
+      <div className="row" style={{ alignItems: "center" }}>
+        <div className="section-label" style={{ flex: 1 }}>Machines in this fleet</div>
+        <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onAddMachine}>＋ add</button>
+      </div>
+      {fleet.map((e) => (
+        <div key={e.deck.id} className="card"><div className="row">
+          <div className="grow"><h3>{machineName(e)}</h3>
+            <div className="sub">{e.online ? (e.snap ? "● online · " + e.snap.os + " · cuxdeck " + e.snap.version : "● online") : "○ unreachable"}
+              {e.deck.url ? "" : " · this device"}</div></div>
+          {e.deck.url ? <button className="btn danger small" onClick={() => onForget(e.deck)}>forget</button> : null}
+        </div></div>
+      ))}
+      <div className="section-label">Paired devices (per machine)</div>
+      {fleet.filter((e) => e.online).map((e) => (
+        <DeviceList key={e.deck.id} entry={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} setSheet={setSheet} />
+      ))}
+      <div className="section-label">About</div>
+      <div className="card">
+        <h3>⌁ cuxdeck</h3>
+        <div className="sub" style={{ marginTop: 6 }}>The fleet is assembled here in your browser — each machine is a
+          separate deck with its own tunnel and token. Add another with its pairing link; forget it to drop it.</div>
+      </div>
+    </>
+  );
+}
+
+function DeviceList({ entry, label, toast, setSheet }: {
+  entry: Entry; label: string; toast: (m: string, ms?: number) => void; setSheet: (n: React.ReactNode | null) => void;
 }) {
   const [devs, setDevs] = useState<Device[] | null>(null);
-  const load = useCallback(() => { api<Device[]>("/api/devices").then(setDevs).catch(() => {}); }, []);
+  const load = useCallback(() => { api<Device[]>(entry.deck, "/api/devices").then(setDevs).catch(() => {}); }, [entry.deck]);
   useEffect(load, [load]);
   const doRevoke = async (id: string) => {
     setSheet(null);
-    try { await api("/api/devices/revoke", { method: "POST", body: JSON.stringify({ id }) }); toast("Device revoked"); load(); }
-    catch (e) { toast("Failed: " + (e as Error).message); }
+    try { await api(entry.deck, "/api/devices/revoke", { method: "POST", body: JSON.stringify({ id }) }); toast("Device revoked"); load(); }
+    catch (err) { toast("Failed: " + (err as Error).message); }
   };
   return (
     <>
-      <div className="section-label">Paired devices</div>
+      {label && <div className="sub" style={{ margin: "2px 4px", fontWeight: 700 }}>{label}</div>}
       {devs === null && <div className="skel" />}
       {devs?.map((d) => (
         <div key={d.id} className="card"><div className="row">
@@ -427,12 +505,6 @@ function SettingsTab({ deck, toast, setSheet }: {
         </div></div>
       ))}
       {devs?.length === 0 && <div className="card empty">No devices.</div>}
-      <div className="section-label">About</div>
-      <div className="card">
-        <h3>⌁ cuxdeck <span className="sub">{deck.version}</span></h3>
-        <div className="sub" style={{ marginTop: 6 }}>Deck <span className="mono">{deck.deckId}</span> on {deck.hostname} ({deck.os}).
-          To watch another machine, install cuxdeck there and scan its QR.</div>
-      </div>
     </>
   );
 }
@@ -472,13 +544,26 @@ function ProjectSheet({ host, create, toast }: {
   );
 }
 
-function SeatSheet({ project, deck, toast, refresh, act, close }: {
-  project: Project; deck: Deck; toast: (m: string) => void; refresh: () => void;
-  act: (a: string, args: Record<string, string>, note: string) => void; close: () => void;
+function AddMachineSheet({ add }: { add: (link: string) => void }) {
+  const [link, setLink] = useState("");
+  return (
+    <>
+      <h2>Add a machine</h2>
+      <div className="sheet-sub">On the other computer run <span className="mono">cuxdeck qr</span> (or read its terminal) and paste the pairing link here — it looks like <span className="mono">https://…trycloudflare.com/#p=CODE</span>.</div>
+      <div className="field"><label>Pairing link</label>
+        <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…/#p=…" autoCapitalize="none" autoComplete="off" spellCheck={false} /></div>
+      <button className="btn" style={{ width: "100%" }} onClick={() => add(link)}>Add machine</button>
+    </>
+  );
+}
+
+function SeatSheet({ project, snap, deck, toast, refresh, act, close }: {
+  project: Project; snap: Snapshot; deck: Deck; toast: (m: string) => void; refresh: () => void;
+  act: (deck: Deck, a: string, args: Record<string, string>, note: string) => void; close: () => void;
 }) {
   const had = useMemo(() => new Set(project.slots || []), [project]);
   const [want, setWant] = useState(() => new Set(project.slots || []));
-  const accts = Object.values(deck.accounts || {}).sort((a, b) => a.slot - b.slot);
+  const accts = Object.values(snap.accounts || {}).sort((a, b) => a.slot - b.slot);
   const toggle = (slot: number) => setWant((w) => { const n = new Set(w); n.has(slot) ? n.delete(slot) : n.add(slot); return n; });
   const save = async () => {
     close();
@@ -486,8 +571,8 @@ function SeatSheet({ project, deck, toast, refresh, act, close }: {
     if (!adds.length && !dels.length) { toast("No changes"); return; }
     toast("Saving seats…");
     try {
-      for (const s of adds) await api("/api/action", { method: "POST", body: JSON.stringify({ action: "project-assign", args: { name: project.name, seat: String(s) } }) });
-      for (const s of dels) await api("/api/action", { method: "POST", body: JSON.stringify({ action: "project-unassign", args: { name: project.name, seat: String(s) } }) });
+      for (const s of adds) await api(deck, "/api/action", { method: "POST", body: JSON.stringify({ action: "project-assign", args: { name: project.name, seat: String(s) } }) });
+      for (const s of dels) await api(deck, "/api/action", { method: "POST", body: JSON.stringify({ action: "project-unassign", args: { name: project.name, seat: String(s) } }) });
       toast("Saved ✓"); refresh();
     } catch (e) { toast("Failed: " + (e as Error).message); }
   };
@@ -504,14 +589,14 @@ function SeatSheet({ project, deck, toast, refresh, act, close }: {
         ))}
       </div>
       <div className="row" style={{ gap: 10, marginTop: 14 }}>
-        <button className="btn danger" onClick={() => { close(); if (confirm("Remove project " + project.name + "? Accounts stay.")) act("project-remove", { name: project.name }, "Removing…"); }}>Remove</button>
+        <button className="btn danger" onClick={() => { close(); if (confirm("Remove project " + project.name + "? Accounts stay.")) act(deck, "project-remove", { name: project.name }, "Removing…"); }}>Remove</button>
         <button className="btn" style={{ flex: 1 }} onClick={save}>Save</button>
       </div>
     </>
   );
 }
 
-/* ---------- pairing ---------- */
+/* ---------- pairing (first deck, this origin) ---------- */
 
 function Pair({ onPaired }: { onPaired: () => void }) {
   const [code, setCode] = useState(() => {
@@ -524,12 +609,8 @@ function Pair({ onPaired }: { onPaired: () => void }) {
     if (!c) return;
     setErr("");
     try {
-      const r = await fetch("/api/pair", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: c, name: deviceName() }),
-      });
-      if (!r.ok) throw 0;
-      setToken((await r.json()).token);
+      const token = await pair("", c, deviceName()); // "" = this origin
+      upsertDeck({ id: "self", url: "", token });
       history.replaceState(null, "", location.pathname);
       onPaired();
     } catch { setErr("Invalid or expired code — generate a fresh one on the computer."); }

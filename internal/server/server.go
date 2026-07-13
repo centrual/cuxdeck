@@ -51,7 +51,32 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
-		h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'")
+		// The fleet view is assembled in the browser: a phone paired to
+		// one deck fetches /api/deck (and opens chat/term streams) on
+		// every *other* deck's tunnel origin. Those are cross-origin, so
+		// the API surface opts into CORS. This is safe because every
+		// /api route is bearer-token authed — we trust the token, never
+		// the Origin — so "*" grants nothing a valid token wouldn't.
+		// The panel HTML and /local/pairing are same-origin/loopback and
+		// deliberately excluded.
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			h.Set("Access-Control-Allow-Origin", "*")
+			h.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			h.Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+			h.Set("Access-Control-Max-Age", "600")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		// connect-src must allow the other decks the phone talks to:
+		// their Quick Tunnels (https/wss) and — for same-machine or
+		// dev fleets — loopback. img-src allows the inline data: URI
+		// favicon. Everything else stays 'self'.
+		h.Set("Content-Security-Policy",
+			"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; "+
+				"connect-src 'self' https://*.trycloudflare.com wss://*.trycloudflare.com "+
+				"http://127.0.0.1:* ws://127.0.0.1:* http://localhost:* ws://localhost:*")
 		next.ServeHTTP(w, r)
 	})
 }
