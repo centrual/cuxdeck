@@ -44,14 +44,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /", s.panel)
 	mux.HandleFunc("POST /api/pair", s.pair)
 	mux.HandleFunc("GET /api/deck", s.authed(s.deck))
-	mux.HandleFunc("POST /api/action", s.authed(s.action))
+	mux.HandleFunc("GET /api/me", s.authed(s.me))
+	mux.HandleFunc("POST /api/invite", s.controlled(s.invite))
+	mux.HandleFunc("POST /api/action", s.controlled(s.action))
 	mux.HandleFunc("GET /api/session/{pid}/chat", s.authed(s.chatStream))
 	mux.HandleFunc("GET /api/conversations", s.authed(s.conversations))
 	mux.HandleFunc("GET /api/conversation/{id}/chat", s.authed(s.conversationChat))
-	mux.HandleFunc("GET /api/session/{pid}/term", s.authed(s.termBridge))
+	mux.HandleFunc("GET /api/session/{pid}/term", s.controlled(s.termBridge))
 	mux.HandleFunc("GET /api/devices", s.authed(s.devices))
-	mux.HandleFunc("POST /api/devices/revoke", s.authed(s.revoke))
-	mux.HandleFunc("POST /api/spawn", s.authed(s.spawn))
+	mux.HandleFunc("POST /api/devices/revoke", s.controlled(s.revoke))
+	mux.HandleFunc("POST /api/spawn", s.controlled(s.spawn))
 	mux.HandleFunc("GET /api/push/key", s.authed(s.pushKey))
 	mux.HandleFunc("POST /api/push/subscribe", s.authed(s.pushSubscribe))
 	mux.HandleFunc("POST /api/push/unsubscribe", s.authed(s.pushUnsubscribe))
@@ -147,6 +149,24 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// controlled guards mutating endpoints: authed, and the device must
+// hold the control role. View-only devices (shared read-only access)
+// get 403 here, so a teammate you gave a look can never switch a seat,
+// spawn a session, drive a terminal, or invite others.
+func (s *Server) controlled(next http.HandlerFunc) http.HandlerFunc {
+	return s.authed(func(w http.ResponseWriter, r *http.Request) {
+		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if tok == "" {
+			tok = r.URL.Query().Get("token")
+		}
+		if s.Auth.Role(tok) != auth.RoleControl {
+			http.Error(w, `{"error":"this device has view-only access"}`, http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -308,6 +328,27 @@ func (s *Server) usageHistory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.Usage.History())
 }
 
+// me tells the panel this device's role so it can hide controls a
+// view-only device isn't allowed to use.
+func (s *Server) me(w http.ResponseWriter, r *http.Request) {
+	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if tok == "" {
+		tok = r.URL.Query().Get("token")
+	}
+	writeJSON(w, map[string]string{"role": s.Auth.Role(tok)})
+}
+
+// invite mints a pairing code from the panel (remotely), with a chosen
+// role — this is how a teammate is added without physical access to
+// the machine. control-only, via s.controlled.
+func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Role string `json:"role"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&in)
+	writeJSON(w, map[string]string{"code": s.Auth.NewPairingCode(in.Role)})
+}
+
 func (s *Server) devices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.Auth.Devices())
 }
@@ -347,7 +388,7 @@ func (s *Server) localOnly(next http.HandlerFunc) http.HandlerFunc {
 // newPairing mints a fresh single-use code for `cuxdeck qr` and the
 // menu bar's pair action.
 func (s *Server) newPairing(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]string{"code": s.Auth.NewPairingCode()})
+	writeJSON(w, map[string]string{"code": s.Auth.NewPairingCode(auth.RoleControl)})
 }
 
 func netSplitHost(hostport string) (string, string, error) {

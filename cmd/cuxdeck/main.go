@@ -153,7 +153,7 @@ func main() {
 // showPairing mints a fresh single-use code and renders the pairing QR
 // plus a hand-typable fallback.
 func showPairing(st *auth.Store, baseURL string) {
-	code := st.NewPairingCode()
+	code := st.NewPairingCode(auth.RoleControl)
 	link := baseURL + "/#p=" + code
 	fmt.Println("\nScan to pair a phone (code is single-use, valid 10 minutes):")
 	printQR(link)

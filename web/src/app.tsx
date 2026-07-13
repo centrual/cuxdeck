@@ -26,8 +26,11 @@ type Conv = { id: string; cwd: string; title: string; updatedAt: string; active:
 type Device = { id: string; name: string; createdAt: string; lastSeen: string };
 
 // One machine's live state: the connection, its latest snapshot and
-// conversations, and whether the last fetch reached it.
-type Entry = { deck: Deck; snap: Snapshot | null; convs: Conv[]; online: boolean };
+// conversations, whether the last fetch reached it, and this device's
+// role on it ("control" or "view" — view hides every mutating control).
+type Entry = { deck: Deck; snap: Snapshot | null; convs: Conv[]; online: boolean; role: string };
+
+const canControl = (e: Entry) => e.role !== "view";
 
 const cacheKey = (a: Account) => (a.uuid && a.orgUuid ? a.uuid + "|" + a.orgUuid : a.orgUuid || a.email);
 const seatLabel = (a: Account) => a.alias || a.email.split("@")[0];
@@ -90,9 +93,11 @@ export default function App() {
         const snap = await api<Snapshot>(deck, "/api/deck");
         let convs: Conv[] = [];
         try { convs = (await api<Conv[]>(deck, "/api/conversations")) || []; } catch { /* keep deck online */ }
+        let role = "control";
+        try { role = (await api<{ role: string }>(deck, "/api/me")).role || "control"; } catch { /* default control */ }
         noteDeckMeta(deck.url, snap.deckId, snap.hostname);
-        return { deck, snap, convs, online: true };
-      } catch { return { deck, snap: null, convs: [], online: false }; }
+        return { deck, snap, convs, online: true, role };
+      } catch { return { deck, snap: null, convs: [], online: false, role: "control" }; }
     }));
     setFleet(entries);
     setDecks(getDecks()); // pick up hostnames learned this round
@@ -157,7 +162,7 @@ export default function App() {
         {!fleet.length && <><div className="skel" /><div className="skel" /><div className="skel" /></>}
 
         {tab === "deck" && fleet.map((e) => (
-          <MachineBlock key={e.deck.id} e={e} showHeader={multi}
+          <MachineBlock key={e.deck.id} e={e} showHeader={multi} control={canControl(e)}
             onOpenSession={(s) => openChat(e.deck, "/api/session/" + s.pid + "/chat", shortDir(s.cwd), "seat " + (s.seat ? s.seat.split("@")[0] : "—"))}
             onOpenConv={(c) => openChat(e.deck, "/api/conversation/" + c.id + "/chat", shortDir(c.cwd || "?"), "")}
             onOpenTerm={(s) => setTermSess({ deck: e.deck, pid: s.pid, title: shortDir(s.cwd) })}
@@ -166,13 +171,13 @@ export default function App() {
         ))}
 
         {tab === "seats" && fleet.map((e) => (
-          <SeatsBlock key={e.deck.id} e={e} showHeader={multi}
+          <SeatsBlock key={e.deck.id} e={e} showHeader={multi} control={canControl(e)}
             onSwitch={(a) => setSheet(<ConfirmSwitch label={seatLabel(a)} onCancel={() => setSheet(null)}
               onGo={() => { setSheet(null); act(e.deck, "switch", { target: String(a.slot) }, "Switching seat…"); }} />)} />
         ))}
 
         {tab === "projects" && fleet.map((e) => (
-          <ProjectsBlock key={e.deck.id} e={e} showHeader={multi}
+          <ProjectsBlock key={e.deck.id} e={e} showHeader={multi} control={canControl(e)}
             onCreate={() => setSheet(<ProjectSheet host={machineName(e)} toast={toast}
               create={(name, dir) => { setSheet(null); act(e.deck, "project-create", { name, dir }, "Creating " + name + "…"); }} />)}
             onSeats={(p) => e.snap && setSheet(<SeatSheet project={p} snap={e.snap} deck={e.deck} toast={toast} refresh={refresh} act={act} close={() => setSheet(null)} />)} />
@@ -258,8 +263,8 @@ function groupByProject(sessions: Session[], convs: Conv[]): ProjectGroup[] {
   });
 }
 
-function ProjectCard({ g, onOpenConv, onOpenSession, onOpenTerm }: {
-  g: ProjectGroup;
+function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
+  g: ProjectGroup; control: boolean;
   onOpenConv: (c: Conv) => void; onOpenSession: (s: Session) => void; onOpenTerm: (s: Session) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -291,7 +296,7 @@ function ProjectCard({ g, onOpenConv, onOpenSession, onOpenTerm }: {
             <div className="sub">seat <b>{s.seat ? s.seat.split("@")[0] : "—"}</b> · up {ago(s.startedAt)}
               {s.detail ? " · ↻ " + s.detail : ""}</div>
           </div>
-          {s.attachable && (
+          {s.attachable && control && (
             <button className="btn ghost small" style={{ flex: "none" }}
               onClick={(ev) => { ev.stopPropagation(); onOpenTerm(s); }}>⌨</button>
           )}
@@ -333,8 +338,8 @@ function ProjectCard({ g, onOpenConv, onOpenSession, onOpenTerm }: {
 
 /* ---------- per-machine tab blocks ---------- */
 
-function MachineBlock({ e, showHeader, onOpenSession, onOpenConv, onOpenTerm, onNewSession, onRefreshUsage }: {
-  e: Entry; showHeader: boolean;
+function MachineBlock({ e, showHeader, control, onOpenSession, onOpenConv, onOpenTerm, onNewSession, onRefreshUsage }: {
+  e: Entry; showHeader: boolean; control: boolean;
   onOpenSession: (s: Session) => void; onOpenConv: (c: Conv) => void; onOpenTerm: (s: Session) => void;
   onNewSession: () => void; onRefreshUsage: () => void;
 }) {
@@ -344,7 +349,7 @@ function MachineBlock({ e, showHeader, onOpenSession, onOpenConv, onOpenTerm, on
     <>
       <div className="row" style={{ alignItems: "center" }}>
         {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>Projects</div>}
-        {e.online && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onNewSession}>＋ new session</button>}
+        {e.online && control && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onNewSession}>＋ new session</button>}
       </div>
       {!e.online && <div className="card empty"><div className="art">📡</div><b>Unreachable</b>
         This machine's tunnel is down or it's offline.</div>}
@@ -353,7 +358,7 @@ function MachineBlock({ e, showHeader, onOpenSession, onOpenConv, onOpenTerm, on
           No sessions or conversations yet.</div>
       )}
       {groups.map((g) => (
-        <ProjectCard key={g.dir} g={g} onOpenConv={onOpenConv} onOpenSession={onOpenSession} onOpenTerm={onOpenTerm} />
+        <ProjectCard key={g.dir} g={g} control={control} onOpenConv={onOpenConv} onOpenSession={onOpenSession} onOpenTerm={onOpenTerm} />
       ))}
       {snap && !showHeader && (
         <>
@@ -403,7 +408,7 @@ function Spark({ pts }: { pts: number[] }) {
   );
 }
 
-function SeatsBlock({ e, showHeader, onSwitch }: { e: Entry; showHeader: boolean; onSwitch: (a: Account) => void }) {
+function SeatsBlock({ e, showHeader, control, onSwitch }: { e: Entry; showHeader: boolean; control: boolean; onSwitch: (a: Account) => void }) {
   const snap = e.snap;
   const accts = snap ? Object.values(snap.accounts || {}).sort((a, b) => a.slot - b.slot) : [];
   const [hist, setHist] = useState<Record<string, Array<{ five: number }>>>({});
@@ -434,7 +439,7 @@ function SeatsBlock({ e, showHeader, onSwitch }: { e: Entry; showHeader: boolean
               </div>
               {a.slot === snap.activeSlot
                 ? <span className="badge active">active</span>
-                : <button className="btn ghost small" onClick={() => onSwitch(a)}>switch</button>}
+                : control ? <button className="btn ghost small" onClick={() => onSwitch(a)}>switch</button> : null}
             </div>
             {u ? (
               <>
@@ -458,8 +463,8 @@ function SeatsBlock({ e, showHeader, onSwitch }: { e: Entry; showHeader: boolean
   );
 }
 
-function ProjectsBlock({ e, showHeader, onSeats, onCreate }: {
-  e: Entry; showHeader: boolean; onSeats: (p: Project) => void; onCreate: () => void;
+function ProjectsBlock({ e, showHeader, control, onSeats, onCreate }: {
+  e: Entry; showHeader: boolean; control: boolean; onSeats: (p: Project) => void; onCreate: () => void;
 }) {
   const snap = e.snap;
   const ps = snap ? Object.values(snap.projects || {}).sort((a, b) => a.name.localeCompare(b.name)) : [];
@@ -467,7 +472,7 @@ function ProjectsBlock({ e, showHeader, onSeats, onCreate }: {
     <>
       <div className="row" style={{ alignItems: "center" }}>
         {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>Projects</div>}
-        {e.online && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onCreate}>＋ new</button>}
+        {e.online && control && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onCreate}>＋ new</button>}
       </div>
       {!e.online && <div className="card empty"><div className="art">📡</div><b>Unreachable</b></div>}
       {e.online && !ps.length && (
@@ -479,7 +484,7 @@ function ProjectsBlock({ e, showHeader, onSeats, onCreate }: {
           <div className="row">
             <div className="grow"><h3>{p.name}</h3>
               <div className="sub ellip mono" style={{ fontSize: 11.5 }}>{p.dir}</div></div>
-            <button className="btn ghost small" onClick={() => onSeats(p)}>seats</button>
+            {control && <button className="btn ghost small" onClick={() => onSeats(p)}>seats</button>}
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             {(p.slots || []).length
@@ -516,8 +521,19 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
           {e.deck.url ? <button className="btn danger small" onClick={() => onForget(e.deck)}>forget</button> : null}
         </div></div>
       ))}
+      <div className="section-label">Share &amp; team access</div>
+      {fleet.filter((e) => e.online && canControl(e)).map((e) => (
+        <div key={e.deck.id} className="card"><div className="row">
+          <div className="grow"><h3>{machineName(e)}</h3>
+            <div className="sub">Invite someone to watch or help drive this machine.</div></div>
+          <button className="btn ghost small" onClick={() => setSheet(<InviteSheet e={e} toast={toast} />)}>invite</button>
+        </div></div>
+      ))}
+      {fleet.some((e) => e.online && !canControl(e)) && (
+        <div className="card"><div className="sub">You have <b>view-only</b> access to {fleet.filter((e) => !canControl(e)).map(machineName).join(", ")} — watch and read, but controls are hidden.</div></div>
+      )}
       <div className="section-label">Paired devices (per machine)</div>
-      {fleet.filter((e) => e.online).map((e) => (
+      {fleet.filter((e) => e.online && canControl(e)).map((e) => (
         <DeviceList key={e.deck.id} entry={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} setSheet={setSheet} />
       ))}
       <div className="section-label">About</div>
@@ -763,6 +779,51 @@ function SpawnSheet({ e, onStart }: { e: Entry; onStart: (dir: string) => void }
       )}
       <button className="btn" style={{ width: "100%" }}
         onClick={() => { if (dir.trim().startsWith("/")) onStart(dir.trim()); }}>Start session ⌨</button>
+    </>
+  );
+}
+
+// InviteSheet mints a pairing link (remotely, from the panel) with a
+// chosen role, so a teammate can be added without touching the machine.
+function InviteSheet({ e, toast }: { e: Entry; toast: (m: string, ms?: number) => void }) {
+  const [role, setRole] = useState<"view" | "control">("view");
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState(false);
+  const make = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { code } = await api<{ code: string }>(e.deck, "/api/invite", { method: "POST", body: JSON.stringify({ role }) });
+      const origin = e.deck.url || location.origin;
+      setLink(origin.replace(/\/$/, "") + "/#p=" + code);
+    } catch (err) { toast("Failed: " + (err as Error).message, 3600); }
+    finally { setBusy(false); }
+  };
+  const copy = async () => { try { await navigator.clipboard.writeText(link); toast("Link copied"); } catch { toast("Copy failed — long-press to select"); } };
+  return (
+    <>
+      <h2>Invite to {machineName(e)}</h2>
+      {!link ? (
+        <>
+          <div className="sheet-sub">Pick what they can do, then share the one-time link. It works for 10 minutes and links one device.</div>
+          <div style={{ margin: "4px 0 14px" }}>
+            {([["view", "View only", "Watch sessions, read conversations. No switching, spawning, or terminal."],
+               ["control", "Full control", "Everything you can do — switch seats, start sessions, drive terminals."]] as const).map(([r, title, desc]) => (
+              <div key={r} className={"choice" + (role === r ? " on" : "")} onClick={() => setRole(r)}>
+                <div className="tick">✓</div>
+                <div className="grow"><b>{title}</b><div className="sub">{desc}</div></div>
+              </div>
+            ))}
+          </div>
+          <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={make}>{busy ? "…" : "Create invite link"}</button>
+        </>
+      ) : (
+        <>
+          <div className="sheet-sub">Send this to your teammate — one device, 10 minutes, <b>{role === "view" ? "view-only" : "full control"}</b>.</div>
+          <div className="field"><input readOnly value={link} onFocus={(ev) => ev.currentTarget.select()} /></div>
+          <button className="btn" style={{ width: "100%" }} onClick={copy}>Copy link</button>
+        </>
+      )}
     </>
   );
 }

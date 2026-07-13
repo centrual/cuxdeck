@@ -36,9 +36,25 @@ const (
 type Device struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
-	TokenHash string    `json:"tokenHash"` // sha256 hex; the token never touches disk
+	TokenHash string    `json:"tokenHash"`      // sha256 hex; the token never touches disk
+	Role      string    `json:"role,omitempty"` // "view" | "control"; "" == control (pre-roles devices)
 	CreatedAt time.Time `json:"createdAt"`
 	LastSeen  time.Time `json:"lastSeen"`
+}
+
+// RoleControl is full access; RoleView is read-only (watch, but no
+// switch/spawn/terminal/invite). A blank role means control, so
+// devices paired before roles existed keep full access.
+const (
+	RoleControl = "control"
+	RoleView    = "view"
+)
+
+func normRole(r string) string {
+	if r == RoleView {
+		return RoleView
+	}
+	return RoleControl
 }
 
 // Store holds paired devices on disk and pairing state in memory.
@@ -47,6 +63,7 @@ type Store struct {
 	path     string
 	devices  []Device
 	pairing  string    // active single-use code, "" when none
+	pairRole string    // role the active code will grant
 	pairExp  time.Time // when the active code dies
 	failures int       // consecutive bad tokens → linear backoff
 }
@@ -80,13 +97,14 @@ func (s *Store) save() {
 // one: 10 chars of crockford-ish base32, comfortable to type by hand
 // when there is no camera, ~50 bits — plenty for a 10-minute window
 // behind exponential backoff.
-func (s *Store) NewPairingCode() string {
+func (s *Store) NewPairingCode(role string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	raw := make([]byte, 7)
 	_, _ = rand.Read(raw)
 	code := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw)[:10]
 	s.pairing = code
+	s.pairRole = normRole(role)
 	s.pairExp = time.Now().Add(pairingTTL)
 	return code
 }
@@ -103,6 +121,7 @@ func (s *Store) Pair(code, name string) (token string, err error) {
 		subtle.ConstantTimeCompare([]byte(code), []byte(s.pairing)) != 1 {
 		return "", ErrBadPairing
 	}
+	role := normRole(s.pairRole)
 	s.pairing = "" // single use
 
 	rawTok := make([]byte, 32)
@@ -120,6 +139,7 @@ func (s *Store) Pair(code, name string) (token string, err error) {
 		ID:        hex.EncodeToString(rawID),
 		Name:      name,
 		TokenHash: hex.EncodeToString(sum[:]),
+		Role:      role,
 		CreatedAt: time.Now().UTC(),
 		LastSeen:  time.Now().UTC(),
 	})
@@ -156,6 +176,22 @@ func (s *Store) Authenticate(token string) bool {
 	s.mu.Unlock()
 	time.Sleep(delay)
 	return false
+}
+
+// Role returns the role of the device holding token, or "" if the
+// token is unknown. A recognised device with a blank stored role is
+// reported as control.
+func (s *Store) Role(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	want := hex.EncodeToString(sum[:])
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.devices {
+		if subtle.ConstantTimeCompare([]byte(s.devices[i].TokenHash), []byte(want)) == 1 {
+			return normRole(s.devices[i].Role)
+		}
+	}
+	return ""
 }
 
 // Devices returns a copy of the paired-device list for the panel.
