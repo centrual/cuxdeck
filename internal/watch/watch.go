@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/centrual/cuxdeck/internal/cuxdata"
-	"github.com/centrual/cuxdeck/internal/push"
+	"github.com/centrual/cuxdeck/internal/notify"
 )
 
 // prev is the slice of the previous snapshot we compare against.
@@ -27,10 +27,31 @@ type sessState struct {
 	start time.Time
 }
 
-// Run polls every interval and notifies via p. It never fires on the
-// first snapshot (that would announce state that predates the phone)
-// and does nothing while no device is subscribed.
-func Run(p *push.Store, interval time.Duration) {
+// fan delivers one event to several channels and reports whether any
+// has a recipient, so the watcher does nothing when all are empty.
+type fan []notify.Notifier
+
+func (f fan) Notify(ev notify.Event) {
+	for _, n := range f {
+		if n != nil && n.Has() {
+			n.Notify(ev)
+		}
+	}
+}
+func (f fan) Has() bool {
+	for _, n := range f {
+		if n != nil && n.Has() {
+			return true
+		}
+	}
+	return false
+}
+
+// Run polls every interval and notifies via every target. It never
+// fires on the first snapshot (that would announce state that predates
+// the phone) and does nothing while no channel has a recipient.
+func Run(targets []notify.Notifier, interval time.Duration) {
+	p := fan(targets)
 	pr := prev{sessions: map[int]sessState{}, expired: map[string]bool{}}
 	for {
 		time.Sleep(interval)
@@ -44,7 +65,7 @@ func Run(p *push.Store, interval time.Duration) {
 	}
 }
 
-func snapshotInto(pr prev, emit bool, p *push.Store) prev {
+func snapshotInto(pr prev, emit bool, p notify.Notifier) prev {
 	d := cuxdata.Snapshot("", time.Now)
 
 	cur := map[int]sessState{}
@@ -62,14 +83,14 @@ func snapshotInto(pr prev, emit bool, p *push.Store) prev {
 			if was.state != now.state {
 				switch now.state {
 				case "retrying":
-					p.Notify(push.Event{Title: "API trouble — retrying", Body: now.dir + " · seat " + now.seat, Tag: "retry-" + itoa(pid)})
+					p.Notify(notify.Event{Title: "API trouble — retrying", Body: now.dir + " · seat " + now.seat, Tag: "retry-" + itoa(pid)})
 				case "waiting-reset":
-					p.Notify(push.Event{Title: "All limits hit — waiting for reset", Body: now.dir + " · seat " + now.seat, Tag: "wait-" + itoa(pid)})
+					p.Notify(notify.Event{Title: "All limits hit — waiting for reset", Body: now.dir + " · seat " + now.seat, Tag: "wait-" + itoa(pid)})
 				case "running":
 					if was.state == "retrying" {
-						p.Notify(push.Event{Title: "Recovered — back to work", Body: now.dir + " · seat " + now.seat, Tag: "retry-" + itoa(pid)})
+						p.Notify(notify.Event{Title: "Recovered — back to work", Body: now.dir + " · seat " + now.seat, Tag: "retry-" + itoa(pid)})
 					} else if was.state == "waiting-reset" {
-						p.Notify(push.Event{Title: "Limits reset — resumed", Body: now.dir + " · seat " + now.seat, Tag: "wait-" + itoa(pid)})
+						p.Notify(notify.Event{Title: "Limits reset — resumed", Body: now.dir + " · seat " + now.seat, Tag: "wait-" + itoa(pid)})
 					}
 				}
 			}
@@ -77,19 +98,19 @@ func snapshotInto(pr prev, emit bool, p *push.Store) prev {
 		// finished sessions
 		for pid, was := range pr.sessions {
 			if _, still := cur[pid]; !still {
-				p.Notify(push.Event{Title: "Session finished", Body: was.dir + " · ran " + dur(time.Since(was.start)), Tag: "done-" + itoa(pid)})
+				p.Notify(notify.Event{Title: "Session finished", Body: was.dir + " · ran " + dur(time.Since(was.start)), Tag: "done-" + itoa(pid)})
 			}
 		}
 		// seat needs re-login
 		for key, u := range d.Usage {
 			if u.TokenExpired && !pr.expired[key] {
-				p.Notify(push.Event{Title: "A seat needs re-login", Body: "Sign in again on the computer to keep the pool full", Tag: "relogin"})
+				p.Notify(notify.Event{Title: "A seat needs re-login", Body: "Sign in again on the computer to keep the pool full", Tag: "relogin"})
 			}
 		}
 		// all seats exhausted (edge-triggered)
 		exh := allExhausted(d)
 		if exh && !pr.exhausted {
-			p.Notify(push.Event{Title: "Every seat is exhausted", Body: resetHint(d), Tag: "exhausted"})
+			p.Notify(notify.Event{Title: "Every seat is exhausted", Body: resetHint(d), Tag: "exhausted"})
 		}
 	}
 

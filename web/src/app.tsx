@@ -469,6 +469,7 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
     <>
       <div className="section-label">Notifications</div>
       <NotifyCard fleet={fleet} toast={toast} />
+      <TelegramCard fleet={fleet} toast={toast} setSheet={setSheet} />
       <div className="row" style={{ alignItems: "center" }}>
         <div className="section-label" style={{ flex: 1 }}>Machines in this fleet</div>
         <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onAddMachine}>＋ add</button>
@@ -531,6 +532,99 @@ function NotifyCard({ fleet, toast }: { fleet: Entry[]; toast: (m: string, ms?: 
       <button className={"btn small" + (on ? " danger" : "")} disabled={busy} onClick={toggle}>
         {busy ? "…" : on ? "Turn off" : "Enable"}</button>
     </div></div>
+  );
+}
+
+// TelegramCard connects a bot on the primary (first-listed) machine —
+// Telegram is a single channel per deck, not per-device, so one link
+// covers everyone. The wizard: paste BotFather token → send the bot a
+// message → cuxdeck catches the chat id.
+function TelegramCard({ fleet, toast, setSheet }: {
+  fleet: Entry[]; toast: (m: string, ms?: number) => void; setSheet: (n: React.ReactNode | null) => void;
+}) {
+  const deck = fleet.find((e) => e.online)?.deck;
+  const [status, setStatus] = useState<{ hasToken: boolean; linked: boolean } | null>(null);
+  const load = useCallback(() => {
+    if (!deck) return;
+    api<{ hasToken: boolean; linked: boolean }>(deck, "/api/telegram/status").then(setStatus).catch(() => {});
+  }, [deck]);
+  useEffect(load, [load]);
+  if (!deck) return null;
+
+  const disconnect = async () => {
+    await api(deck, "/api/telegram/disconnect", { method: "POST", body: "{}" }).catch(() => {});
+    toast("Telegram disconnected"); load();
+  };
+  return (
+    <div className="card"><div className="row">
+      <div className="grow"><h3>Telegram</h3>
+        <div className="sub">{status?.linked
+          ? "● linked — alerts also go to your Telegram chat"
+          : "Get the same alerts in a Telegram chat that outlives any phone."}</div></div>
+      {status?.linked
+        ? <button className="btn danger small" onClick={disconnect}>unlink</button>
+        : <button className="btn ghost small" onClick={() => setSheet(
+          <TelegramWizard deck={deck} toast={toast} onDone={() => { setSheet(null); load(); }} />)}>connect</button>}
+    </div></div>
+  );
+}
+
+function TelegramWizard({ deck, toast, onDone }: { deck: Deck; toast: (m: string, ms?: number) => void; onDone: () => void }) {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const polling = useRef(false);
+
+  const saveToken = async () => {
+    if (busy || !token.trim()) return;
+    setBusy(true);
+    try {
+      await api(deck, "/api/telegram/token", { method: "POST", body: JSON.stringify({ token: token.trim() }) });
+      setStep(2);
+      startPolling();
+    } catch (e) { toast((e as Error).message, 3600); }
+    finally { setBusy(false); }
+  };
+
+  // After the token is set, poll getUpdates until the user's /start
+  // lands and cuxdeck captures the chat id.
+  const startPolling = () => {
+    if (polling.current) return;
+    polling.current = true;
+    let tries = 0;
+    const tick = async () => {
+      if (!polling.current) return;
+      tries++;
+      try {
+        const { linked } = await api<{ linked: boolean }>(deck, "/api/telegram/poll", { method: "POST", body: "{}" });
+        if (linked) { polling.current = false; toast("Telegram linked ✓"); onDone(); return; }
+      } catch { /* keep trying */ }
+      if (tries < 60) setTimeout(tick, 2000); else { polling.current = false; toast("No message received — send your bot /start and retry"); }
+    };
+    setTimeout(tick, 1500);
+  };
+  useEffect(() => () => { polling.current = false; }, []);
+
+  return (
+    <>
+      <h2>Connect Telegram</h2>
+      {step === 1 ? (
+        <>
+          <div className="sheet-sub">1. In Telegram, open <b>@BotFather</b> → <span className="mono">/newbot</span>, follow the prompts, and copy the token it gives you.</div>
+          <div className="field"><label>Bot token</label>
+            <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="123456:ABC-DEF…"
+              autoCapitalize="none" autoComplete="off" spellCheck={false} /></div>
+          <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={saveToken}>{busy ? "Checking…" : "Save token"}</button>
+        </>
+      ) : (
+        <>
+          <div className="sheet-sub">2. Now open your bot in Telegram and tap <b>Start</b> (or send it any message). Waiting for it to arrive…</div>
+          <div className="cstat" style={{ justifyContent: "center", padding: "18px 0" }}>
+            <span className="spin">✳</span> listening for your message
+          </div>
+        </>
+      )}
+    </>
   );
 }
 

@@ -21,8 +21,10 @@ import (
 	"time"
 
 	"github.com/centrual/cuxdeck/internal/auth"
+	"github.com/centrual/cuxdeck/internal/notify"
 	"github.com/centrual/cuxdeck/internal/push"
 	"github.com/centrual/cuxdeck/internal/server"
+	"github.com/centrual/cuxdeck/internal/telegram"
 	"github.com/centrual/cuxdeck/internal/tunnel"
 	"github.com/centrual/cuxdeck/internal/watch"
 	qrcode "github.com/skip2/go-qrcode"
@@ -77,17 +79,23 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Web Push: a VAPID keypair + local subscription store, and a
-	// watcher that turns cux state changes into notifications. Both are
-	// best-effort — if push can't initialise, the panel still runs.
+	// Alerts: Web Push (VAPID keypair + local subs) and Telegram (bot
+	// token + chat id). A single watcher fans cux state changes out to
+	// whichever channels are enabled. All best-effort — if a channel
+	// can't initialise, the panel still runs.
 	pushStore, perr := push.Open(home())
 	if perr != nil {
 		fmt.Fprintln(os.Stderr, "cuxdeck: push disabled:", perr)
-	} else {
-		go watch.Run(pushStore, 5*time.Second)
 	}
+	tgStore := telegram.Open(home())
+	var notifiers []notify.Notifier
+	if pushStore != nil {
+		notifiers = append(notifiers, pushStore)
+	}
+	notifiers = append(notifiers, tgStore)
+	go watch.Run(notifiers, 5*time.Second)
 
-	srv := &server.Server{Auth: st, Push: pushStore, Version: version}
+	srv := &server.Server{Auth: st, Push: pushStore, TG: tgStore, Version: version}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cuxdeck:", err)

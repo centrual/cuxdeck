@@ -15,15 +15,12 @@ import (
 	"time"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
+	"github.com/centrual/cuxdeck/internal/notify"
 )
 
-// Event is what a notification carries. Kept tiny — the service worker
-// turns it into a native notification and, on tap, focuses the panel.
-type Event struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
-	Tag   string `json:"tag"` // collapses repeats of the same kind
-}
+// Event is re-exported from notify so callers can keep using push.Event
+// while the watcher speaks the shared type.
+type Event = notify.Event
 
 type sub struct {
 	Device       string                `json:"device"` // owning device token (SHA-256 hex)

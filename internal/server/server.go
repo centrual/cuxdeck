@@ -20,6 +20,7 @@ import (
 	"github.com/centrual/cuxdeck/internal/cuxdata"
 	"github.com/centrual/cuxdeck/internal/push"
 	"github.com/centrual/cuxdeck/internal/spawn"
+	"github.com/centrual/cuxdeck/internal/telegram"
 )
 
 //go:generate go run ../../tools/buildweb
@@ -31,6 +32,7 @@ var webFS embed.FS
 type Server struct {
 	Auth    *auth.Store
 	Push    *push.Store
+	TG      *telegram.Store
 	Version string
 }
 
@@ -51,6 +53,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/push/key", s.authed(s.pushKey))
 	mux.HandleFunc("POST /api/push/subscribe", s.authed(s.pushSubscribe))
 	mux.HandleFunc("POST /api/push/unsubscribe", s.authed(s.pushUnsubscribe))
+	mux.HandleFunc("GET /api/telegram/status", s.authed(s.tgStatus))
+	mux.HandleFunc("POST /api/telegram/token", s.authed(s.tgToken))
+	mux.HandleFunc("POST /api/telegram/poll", s.authed(s.tgPoll))
+	mux.HandleFunc("POST /api/telegram/disconnect", s.authed(s.tgDisconnect))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
 	return securityHeaders(mux)
 }
@@ -240,6 +246,53 @@ func (s *Server) pushSubscribe(w http.ResponseWriter, r *http.Request) {
 func (s *Server) pushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	if s.Push != nil {
 		s.Push.Unsubscribe(deviceKey(r))
+	}
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func (s *Server) tgStatus(w http.ResponseWriter, r *http.Request) {
+	if s.TG == nil {
+		writeJSON(w, map[string]any{"hasToken": false, "linked": false})
+		return
+	}
+	writeJSON(w, s.TG.Status())
+}
+
+func (s *Server) tgToken(w http.ResponseWriter, r *http.Request) {
+	if s.TG == nil {
+		http.Error(w, `{"error":"telegram unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	var in struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Token == "" {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	if err := s.TG.SetToken(r.Context(), strings.TrimSpace(in.Token)); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func (s *Server) tgPoll(w http.ResponseWriter, r *http.Request) {
+	if s.TG == nil {
+		http.Error(w, `{"error":"telegram unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	linked, err := s.TG.Poll(r.Context())
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]bool{"linked": linked})
+}
+
+func (s *Server) tgDisconnect(w http.ResponseWriter, r *http.Request) {
+	if s.TG != nil {
+		s.TG.Disconnect()
 	}
 	writeJSON(w, map[string]bool{"ok": true})
 }
