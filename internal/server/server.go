@@ -7,6 +7,7 @@ package server
 import (
 	"crypto/sha256"
 	"embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"net"
@@ -94,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/service", s.controlled(s.serviceSet))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
 	mux.HandleFunc("GET /local/qr.png", s.localOnly(s.pairingQR))
+	mux.HandleFunc("GET /local/pair-info", s.localOnly(s.pairInfo))
 	return securityHeaders(mux)
 }
 
@@ -522,6 +524,33 @@ func (s *Server) pairingQR(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) newPairing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"code": s.Auth.NewPairingCode(auth.RoleControl)})
+}
+
+// pairInfo returns everything the "Add a phone" card needs in one shot:
+// the public URL to show as text, and a QR image (data URL) — both
+// carrying the *same* fresh single-use code, so a phone can either scan
+// the QR or open the written link and land on the identical pairing.
+// localOnly — same live-credential rule as the QR.
+func (s *Server) pairInfo(w http.ResponseWriter, r *http.Request) {
+	base := "http://" + r.Host
+	if s.CurrentURL != nil {
+		if u := s.CurrentURL(); u != "" {
+			base = u
+		}
+	}
+	code := s.Auth.NewPairingCode(auth.RoleControl)
+	link := base + "/#p=" + code
+	png, err := qrcode.Encode(link, qrcode.Medium, 512)
+	if err != nil {
+		http.Error(w, "qr error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, map[string]string{
+		"url":  base,
+		"link": link,
+		"qr":   "data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
+	})
 }
 
 func netSplitHost(hostport string) (string, string, error) {

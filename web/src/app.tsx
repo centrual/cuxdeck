@@ -602,21 +602,45 @@ function StartupCard({ e, label, toast }: { e: Entry; label: string; toast: (m: 
 // so on a phone it explains where to find it instead of failing.
 function PairPhoneCard({ toast }: { toast: (m: string, ms?: number) => void }) {
   const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-  const [n, setN] = useState(0); // bump to refresh the QR (new code)
+  const [info, setInfo] = useState<{ url: string; link: string; qr: string } | null>(null);
+  const [err, setErr] = useState("");
+  const load = useCallback(async () => {
+    setErr("");
+    try {
+      const r = await fetch("/local/pair-info");
+      if (!r.ok) throw new Error(String(r.status));
+      setInfo(await r.json());
+    } catch { setErr("Couldn't load the pairing QR."); }
+  }, []);
+  useEffect(() => { if (isLocal) load(); }, [isLocal, load]);
   if (!isLocal) {
     return (
       <div className="card"><div className="sub">To add a phone, open cuxdeck's panel <b>on the computer itself</b>
         (menu-bar icon → “Open panel · pair a phone”). The scannable QR shows there.</div></div>
     );
   }
+  const isTunnel = /^https:\/\//.test(info?.url || "");
   return (
     <div className="card" style={{ textAlign: "center" }}>
       <div className="sub" style={{ marginBottom: 10 }}>Scan with your phone's camera — it opens cuxdeck on your phone, already paired.</div>
-      <img src={"/local/qr.png?n=" + n} width={200} height={200} alt="pairing QR"
-        style={{ borderRadius: 14, background: "#fff", padding: 10 }} />
-      <div style={{ marginTop: 10 }}>
-        <button className="btn ghost small" onClick={() => { setN(n + 1); toast("Fresh QR — valid 10 minutes"); }}>↻ new QR</button>
-      </div>
+      {err ? <div className="sub" style={{ color: "var(--bad)" }}>{err}</div>
+        : info ? <img src={info.qr} width={200} height={200} alt="pairing QR"
+            style={{ borderRadius: 14, background: "#fff", padding: 10 }} />
+        : <div className="sub">loading…</div>}
+      {info && (
+        <div style={{ marginTop: 12 }}>
+          {/* The written address, so a phone that can't scan can just type
+              it — and so it's obvious which tunnel URL is current (the
+              trycloudflare address rotates on every restart, which is what
+              strands a phone on a dead URL / Error 1033). */}
+          <div className="sub" style={{ marginBottom: 4 }}>{isTunnel ? "Or open this address on the phone:" : "Local address (no public tunnel yet):"}</div>
+          <div className="mono" style={{ wordBreak: "break-all", fontSize: 13, padding: "8px 10px", background: "var(--card)", border: "1px solid var(--line)", borderRadius: 10 }}>{info.url}</div>
+          <div className="row" style={{ gap: 8, marginTop: 8, justifyContent: "center" }}>
+            <button className="btn small" onClick={() => { navigator.clipboard?.writeText(info.link); toast("Pairing link copied — valid 10 min"); }}>Copy pairing link</button>
+            <button className="btn ghost small" onClick={() => { load(); toast("Fresh QR & link"); }}>↻ new</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -807,12 +831,12 @@ function TelegramWizard({ deck, toast, onDone }: { deck: Deck; toast: (m: string
         <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
           <Step n={1} title={<>Open <b>BotFather</b> in Telegram</>}>
             <div className="sub">Telegram's official bot for making bots — the blue ✓ verified one.</div>
-            {/* tg:// opens the installed Telegram app directly. We deliberately
-                avoid the t.me web link: some networks (Turkey among them) block
-                that domain at the DNS level, so it fails with NXDOMAIN even
-                though Telegram itself works fine. */}
+            {/* t.me works everywhere a browser does (desktop included),
+                unlike a tg:// deep link which needs the app installed. If a
+                network blocks t.me at the DNS level, the manual note below
+                still gets you there. */}
             <a className="btn small" style={{ display: "inline-block", marginTop: 6, textDecoration: "none" }}
-              href="tg://resolve?domain=BotFather">Open @BotFather in Telegram ›</a>
+              href="https://t.me/BotFather" target="_blank" rel="noopener">Open @BotFather ›</a>
             <div className="sub" style={{ marginTop: 6 }}>Button not working? Open Telegram and search <span className="mono">@BotFather</span> by hand.</div>
           </Step>
           <Step n={2} title={<>Send it <span className="mono">/newbot</span></>}>
