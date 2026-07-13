@@ -17,6 +17,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -33,7 +35,28 @@ import (
 	qrcode "github.com/skip2/go-qrcode"
 )
 
-var version = "0.1.0-dev"
+// version is stamped at release time via -ldflags "-X main.version=…".
+// When that isn't set — notably `go install …@vX.Y.Z`, which can't inject
+// ldflags — we fall back to the module version the toolchain records in
+// the build info, so `cuxdeck version` still reports the real release.
+var version = "dev"
+
+// pseudoVersion matches Go's VCS pseudo-versions (…-YYYYMMDDHHMMSS-<hash>),
+// which the toolchain stamps for a `go build` in a checkout or `go install
+// @main`. Those aren't real releases, so we keep reporting "dev" for them.
+var pseudoVersion = regexp.MustCompile(`\d{14}-[0-9a-f]{12}`)
+
+func init() {
+	if version != "dev" {
+		return // an explicit -ldflags value always wins
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		v := bi.Main.Version
+		if v != "" && v != "(devel)" && !strings.Contains(v, "+") && !pseudoVersion.MatchString(v) {
+			version = strings.TrimPrefix(v, "v")
+		}
+	}
+}
 
 func home() string {
 	h, _ := os.UserHomeDir()
