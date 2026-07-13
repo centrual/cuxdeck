@@ -90,15 +90,21 @@ func main() {
 		daemon()
 		return
 	}
-	base := func() string {
+	// "Open cuxdeck" points at the local panel, not the tunnel: the
+	// pairing QR only renders on loopback (it's a live credential), so
+	// this is where you see the QR to scan and can pair the computer
+	// itself. The tunnel URL is for the phone, and rides in the QR /
+	// the copied pairing link.
+	local := fmt.Sprintf("http://127.0.0.1:%d", *port)
+	tunnelBase := func() string {
 		if b, err := os.ReadFile(filepath.Join(home(), "current-url")); err == nil && len(b) > 0 {
 			return string(b)
 		}
-		return fmt.Sprintf("http://127.0.0.1:%d", *port)
+		return local
 	}
 	tray.Run(tray.Deps{
-		CurrentURL:        base,
-		PairingLink:       func() string { return base() + "/#p=" + st.NewPairingCode(auth.RoleControl) },
+		CurrentURL:        func() string { return local },
+		PairingLink:       func() string { return tunnelBase() + "/#p=" + st.NewPairingCode(auth.RoleControl) },
 		StartAtLoginState: serviceInstalled,
 		SetStartAtLogin: func(on bool) error {
 			if on {
@@ -180,11 +186,19 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 			prev, _ := os.ReadFile(filepath.Join(home(), "current-url"))
 			_ = os.WriteFile(filepath.Join(home(), "current-url"), []byte(u), 0o600)
 			showPairing(st, u)
-			// A rotated tunnel address is exactly the "panel moved — tap
-			// to reopen" case Web Push exists for: the old service worker
-			// still receives it even though its origin just changed.
-			if pushStore != nil && len(prev) > 0 && string(prev) != u {
-				pushStore.Notify(push.Event{Title: "cuxdeck moved", Body: "New address — tap to reopen the panel", Tag: "tunnel-url"})
+			// The accountless Quick Tunnel picks a new address every time
+			// the daemon (re)starts, so a device left on the old URL 404s.
+			// Announce the new address on every channel — crucially
+			// Telegram, whose chat is independent of the tunnel origin, so
+			// it works even though the Web Push subscription is tied to
+			// the old (now-dead) origin. The message carries the URL
+			// itself, so it's a tap away wherever it lands.
+			if len(prev) > 0 && string(prev) != u {
+				ev := notify.Event{Title: "cuxdeck moved — new address", Body: u, Tag: "tunnel-url"}
+				if pushStore != nil {
+					pushStore.Notify(ev)
+				}
+				tgStore.Notify(ev)
 			}
 		},
 	}

@@ -43,7 +43,7 @@ func Run(d Deps, daemon func()) {
 		systray.SetIcon(iconPNG)
 		systray.SetTooltip("cuxdeck — mission control for your cux fleet")
 
-		mOpen := systray.AddMenuItem("Open cuxdeck", "Open the panel in your browser")
+		mOpen := systray.AddMenuItem("Open panel · pair a phone", "Open the panel here — scan the QR with your phone")
 		mPair := systray.AddMenuItem("Copy pairing link", "Copy a fresh one-time link to add a device")
 		systray.AddSeparator()
 		mLogin := systray.AddMenuItemCheckbox("Start at login", "Launch cuxdeck when this computer starts", false)
