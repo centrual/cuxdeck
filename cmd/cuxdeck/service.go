@@ -15,7 +15,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
+
+// plistEscape makes a string safe inside a plist <string> element.
+func plistEscape(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
+}
 
 const serviceID = "com.centrual.cuxdeck"
 
@@ -51,11 +57,19 @@ func installService() error {
 			return err
 		}
 		plist := filepath.Join(dir, serviceID+".plist")
+		// launchd starts us with a bare PATH (/usr/bin:/bin:…), so cux
+		// and claude — typically under ~/.volta/bin or ~/.local/bin —
+		// wouldn't be found for spawning sessions. Bake in the PATH of
+		// whoever ran `install` (their real shell PATH) so the daemon
+		// resolves the same tools it would in a terminal.
 		body := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>` + serviceID + `</string>
   <key>ProgramArguments</key><array><string>` + bin + `</string></array>
+  <key>EnvironmentVariables</key><dict>
+    <key>PATH</key><string>` + plistEscape(os.Getenv("PATH")) + `</string>
+  </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>StandardOutPath</key><string>` + logPath + `</string>
