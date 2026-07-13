@@ -116,6 +116,19 @@ go install github.com/centrual/cuxdeck/cmd/cuxdeck@latest
 
 Every release ships a `checksums.txt`; verify with `shasum -a 256 -c`.
 
+### Requires cux
+
+cuxdeck reads [cux](https://github.com/inulute/cux)'s on-disk session registry —
+no patching, no plugin. Everything works against a **stock cux ≥ v0.2.11**:
+sessions, seats, projects, the live conversation view, remote session launch.
+
+The one feature that needs more is the **live in-browser terminal** (mirroring
+and driving a running session): it depends on cux advertising an attach socket,
+which lands with [inulute/cux#31](https://github.com/inulute/cux/pull/31). Until
+that ships, the terminal button simply stays hidden — cuxdeck detects it per
+session (the `attachable` flag) and degrades cleanly. When #31 merges into a cux
+release, terminals light up on their own, no cuxdeck update needed.
+
 ## How it works
 
 ```
