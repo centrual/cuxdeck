@@ -15,6 +15,7 @@ import (
 	"github.com/centrual/cuxdeck/internal/auth"
 	"github.com/centrual/cuxdeck/internal/cuxcli"
 	"github.com/centrual/cuxdeck/internal/cuxdata"
+	"github.com/centrual/cuxdeck/internal/spawn"
 )
 
 //go:generate go run ../../tools/buildweb
@@ -41,6 +42,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/session/{pid}/term", s.authed(s.termBridge))
 	mux.HandleFunc("GET /api/devices", s.authed(s.devices))
 	mux.HandleFunc("POST /api/devices/revoke", s.authed(s.revoke))
+	mux.HandleFunc("POST /api/spawn", s.authed(s.spawn))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
 	return securityHeaders(mux)
 }
@@ -170,6 +172,25 @@ func (s *Server) action(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, res)
+}
+
+// spawn launches a new cux session in a chosen directory. The panel
+// then opens the terminal view on the returned pid.
+func (s *Server) spawn(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Dir  string   `json:"dir"`
+		Argv []string `json:"argv,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	pid, err := spawn.Start(in.Dir, in.Argv)
+	if err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]int{"pid": pid})
 }
 
 func (s *Server) devices(w http.ResponseWriter, r *http.Request) {

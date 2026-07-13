@@ -109,6 +109,19 @@ export default function App() {
     catch (e) { toast("Failed: " + (e as Error).message, 3600); }
   }, [refresh, toast]);
 
+  // Launch a brand-new cux session on a machine, then jump straight
+  // into its terminal — start work from the phone, not just watch it.
+  const spawnSession = useCallback(async (deck: Deck, dir: string) => {
+    setSheet(null);
+    toast("Starting cux in " + shortDir(dir) + "…");
+    try {
+      const { pid } = await api<{ pid: number }>(deck, "/api/spawn", { method: "POST", body: JSON.stringify({ dir }) });
+      // Give cux a moment to open its attach socket before we connect.
+      setTimeout(() => setTermSess({ deck, pid, title: shortDir(dir) }), 700);
+      refresh();
+    } catch (e) { toast("Failed: " + (e as Error).message, 3600); }
+  }, [refresh, toast]);
+
   const addMachine = useCallback(async (link: string) => {
     const parsed = parsePairLink(link);
     if (!parsed) { toast("That doesn't look like a cuxdeck link"); return; }
@@ -147,6 +160,7 @@ export default function App() {
             onOpenSession={(s) => openChat(e.deck, "/api/session/" + s.pid + "/chat", shortDir(s.cwd), "seat " + (s.seat ? s.seat.split("@")[0] : "—"))}
             onOpenConv={(c) => openChat(e.deck, "/api/conversation/" + c.id + "/chat", shortDir(c.cwd || "?"), "")}
             onOpenTerm={(s) => setTermSess({ deck: e.deck, pid: s.pid, title: shortDir(s.cwd) })}
+            onNewSession={() => setSheet(<SpawnSheet e={e} onStart={(dir) => spawnSession(e.deck, dir)} />)}
             onRefreshUsage={() => act(e.deck, "usage-refresh", {}, "Refreshing usage…")} />
         ))}
 
@@ -318,15 +332,19 @@ function ProjectCard({ g, onOpenConv, onOpenSession, onOpenTerm }: {
 
 /* ---------- per-machine tab blocks ---------- */
 
-function MachineBlock({ e, showHeader, onOpenSession, onOpenConv, onOpenTerm, onRefreshUsage }: {
+function MachineBlock({ e, showHeader, onOpenSession, onOpenConv, onOpenTerm, onNewSession, onRefreshUsage }: {
   e: Entry; showHeader: boolean;
-  onOpenSession: (s: Session) => void; onOpenConv: (c: Conv) => void; onOpenTerm: (s: Session) => void; onRefreshUsage: () => void;
+  onOpenSession: (s: Session) => void; onOpenConv: (c: Conv) => void; onOpenTerm: (s: Session) => void;
+  onNewSession: () => void; onRefreshUsage: () => void;
 }) {
   const snap = e.snap;
   const groups = snap ? groupByProject(snap.sessions || [], e.convs) : [];
   return (
     <>
-      {showHeader ? <MachineHeader e={e} /> : <div className="section-label">Projects</div>}
+      <div className="row" style={{ alignItems: "center" }}>
+        {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>Projects</div>}
+        {e.online && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onNewSession}>＋ new session</button>}
+      </div>
       {!e.online && <div className="card empty"><div className="art">📡</div><b>Unreachable</b>
         This machine's tunnel is down or it's offline.</div>}
       {e.online && !groups.length && (
@@ -540,6 +558,41 @@ function ProjectSheet({ host, create, toast }: {
       <button className="btn" style={{ width: "100%" }}
         onClick={() => { if (!name.trim() || !dir.trim()) { toast("Name and directory are required"); return; } create(name.trim(), dir.trim()); }}>
         Create project</button>
+    </>
+  );
+}
+
+function SpawnSheet({ e, onStart }: { e: Entry; onStart: (dir: string) => void }) {
+  // Suggest directories the machine has actually worked in — every cwd
+  // seen in a live session or a past conversation, most-recent first.
+  const recent = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const s of e.snap?.sessions || []) seen.set(s.cwd, Math.max(seen.get(s.cwd) || 0, Date.parse(s.startedAt) || 0));
+    for (const c of e.convs) if (c.cwd) seen.set(c.cwd, Math.max(seen.get(c.cwd) || 0, Date.parse(c.updatedAt) || 0));
+    return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([d]) => d).slice(0, 8);
+  }, [e]);
+  const [dir, setDir] = useState(recent[0] || "");
+  return (
+    <>
+      <h2>New session on {machineName(e)}</h2>
+      <div className="sheet-sub">cux starts in this directory and opens straight into the terminal. It keeps running after you close the tab.</div>
+      <div className="field"><label>Directory (absolute path)</label>
+        <input value={dir} onChange={(ev) => setDir(ev.target.value)} placeholder="/Users/you/code/project"
+          autoCapitalize="none" autoComplete="off" spellCheck={false} /></div>
+      {recent.length > 0 && (
+        <div style={{ margin: "2px 0 14px" }}>
+          <div className="sub" style={{ marginBottom: 6 }}>Recent</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {recent.map((d) => (
+              <div key={d} className="choice" style={{ padding: "9px 6px" }} onClick={() => setDir(d)}>
+                <div className="grow ellip mono" style={{ fontSize: 12 }}>{d}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <button className="btn" style={{ width: "100%" }}
+        onClick={() => { if (dir.trim().startsWith("/")) onStart(dir.trim()); }}>Start session ⌨</button>
     </>
   );
 }
