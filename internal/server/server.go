@@ -30,6 +30,20 @@ import (
 //go:embed web
 var webFS embed.FS
 
+// assetVer is a short content hash of the bundled panel assets, computed
+// once. It's appended as a ?v= query to app.js/style.css in the served
+// index.html so a browser that cached the old bundle fetches the new one
+// after an update — the URL changes whenever the bytes do.
+var assetVer = func() string {
+	h := sha256.New()
+	for _, name := range []string{"web/app.js", "web/style.css"} {
+		if b, err := webFS.ReadFile(name); err == nil {
+			h.Write(b)
+		}
+	}
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}()
+
 // Server wires the pieces together.
 type Server struct {
 	Auth    *auth.Store
@@ -44,6 +58,10 @@ type Server struct {
 	// CurrentURL returns the public tunnel URL (or the local one) so the
 	// loopback pairing QR points a phone at the right address.
 	CurrentURL func() string
+	// Name / SetName read and set a custom display name for this
+	// machine, overriding the OS hostname in the deck view.
+	Name    func() string
+	SetName func(string) error
 }
 
 // Handler returns the full route table.
@@ -70,6 +88,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/telegram/poll", s.authed(s.tgPoll))
 	mux.HandleFunc("POST /api/telegram/disconnect", s.authed(s.tgDisconnect))
 	mux.HandleFunc("GET /api/usage/history", s.authed(s.usageHistory))
+	mux.HandleFunc("GET /api/name", s.authed(s.getName))
+	mux.HandleFunc("POST /api/name", s.controlled(s.setName))
 	mux.HandleFunc("GET /api/service", s.authed(s.serviceGet))
 	mux.HandleFunc("POST /api/service", s.controlled(s.serviceSet))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
@@ -138,7 +158,21 @@ func (s *Server) panel(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// Stamp the content-hash onto the asset URLs so an updated bundle is
+	// never masked by a cached index.html referencing the old filename.
+	if name == "/index.html" {
+		b = []byte(strings.NewReplacer(
+			`"/app.js"`, `"/app.js?v=`+assetVer+`"`,
+			`"/style.css"`, `"/style.css?v=`+assetVer+`"`,
+		).Replace(string(b)))
+	}
 	w.Header().Set("Content-Type", ctype)
+	// The bundle is baked into the binary and changes whenever cuxdeck is
+	// updated, but the filename never does. Without this, a browser caches
+	// app.js by heuristic and keeps running the old panel after an update.
+	// no-cache forces a revalidation every load; the assets are tiny and
+	// embedded, so a full refetch costs nothing.
+	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(b)
 }
 
@@ -204,7 +238,40 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) deck(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, cuxdata.Snapshot(s.Version, time.Now))
+	snap := cuxdata.Snapshot(s.Version, time.Now)
+	if s.Name != nil {
+		if n := s.Name(); n != "" {
+			snap.Hostname = n
+		}
+	}
+	writeJSON(w, snap)
+}
+
+func (s *Server) getName(w http.ResponseWriter, r *http.Request) {
+	name := ""
+	if s.Name != nil {
+		name = s.Name()
+	}
+	writeJSON(w, map[string]string{"name": name})
+}
+
+func (s *Server) setName(w http.ResponseWriter, r *http.Request) {
+	if s.SetName == nil {
+		http.Error(w, `{"error":"not supported"}`, http.StatusServiceUnavailable)
+		return
+	}
+	var in struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	if err := s.SetName(strings.TrimSpace(in.Name)); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func (s *Server) action(w http.ResponseWriter, r *http.Request) {
@@ -384,7 +451,13 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 		Role string `json:"role"`
 	}
 	_ = json.NewDecoder(r.Body).Decode(&in)
-	writeJSON(w, map[string]string{"code": s.Auth.NewPairingCode(in.Role)})
+	url := ""
+	if s.CurrentURL != nil {
+		url = s.CurrentURL()
+	}
+	// The invite must point at the tunnel — a teammate can't reach
+	// localhost — so hand back the code and the public URL together.
+	writeJSON(w, map[string]string{"code": s.Auth.NewPairingCode(in.Role), "url": url})
 }
 
 func (s *Server) devices(w http.ResponseWriter, r *http.Request) {

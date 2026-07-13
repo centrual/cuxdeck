@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -152,6 +153,16 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 			return uninstallService()
 		},
 		CurrentURL: curURL,
+		Name: func() string {
+			b, _ := os.ReadFile(filepath.Join(home(), "name"))
+			return strings.TrimSpace(string(b))
+		},
+		SetName: func(n string) error {
+			if n == "" {
+				return os.Remove(filepath.Join(home(), "name"))
+			}
+			return os.WriteFile(filepath.Join(home(), "name"), []byte(n), 0o600)
+		},
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {

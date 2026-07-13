@@ -64,6 +64,17 @@ function Mascot({ size }: { size: number }) {
   return <img src="/onion.svg" width={size} height={size} style={{ imageRendering: "pixelated" }} alt="" />;
 }
 
+// The real Telegram mark (blue disc + paper plane) so the wizard is
+// recognizable at a glance.
+function TelegramMark({ size }: { size: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 240 240" aria-hidden="true" style={{ flex: "none" }}>
+      <circle cx="120" cy="120" r="120" fill="#2AABEE" />
+      <path fill="#fff" d="M53.6 118.7c35-15.2 58.3-25.3 70-30.2 33.3-13.9 40.3-16.3 44.8-16.4 1 0 3.2.2 4.7 1.4.9.7 1.4 1.9 1.5 3-.1 1-.3 3.2-.5 4.9-2.2 23.4-11.9 80.2-16.9 106.4-2.1 11.1-6.3 14.8-10.3 15.2-8.7.8-15.3-5.8-23.7-11.3-13.2-8.6-20.6-14-33.4-22.4-14.8-9.7-5.2-15 3.2-23.8 2.2-2.3 40.5-37.1 41.2-40.3.1-.4.2-1.9-.7-2.7s-2.3-.5-3.2-.3c-1.4.3-23.5 14.9-66.4 43.9-6.3 4.3-12 6.4-17.1 6.3-5.6-.1-16.4-3.2-24.5-5.8-9.9-3.2-17.7-4.9-17-10.4.3-2.8 4.2-5.7 11.7-8.7z" />
+    </svg>
+  );
+}
+
 export default function App() {
   const [decks, setDecks] = useState<Deck[]>(getDecks());
   const [fleet, setFleet] = useState<Entry[]>([]);
@@ -506,6 +517,12 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
 }) {
   return (
     <>
+      <div className="section-label">Add a phone</div>
+      <PairPhoneCard toast={toast} />
+      <div className="section-label">This machine</div>
+      {fleet.filter((e) => e.online && canControl(e)).map((e) => (
+        <MachineNameCard key={e.deck.id} e={e} toast={toast} />
+      ))}
       <div className="section-label">Startup</div>
       {fleet.filter((e) => e.online && canControl(e)).map((e) => (
         <StartupCard key={e.deck.id} e={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} />
@@ -577,6 +594,60 @@ function StartupCard({ e, label, toast }: { e: Entry; label: string; toast: (m: 
       <button className={"btn small" + (state?.enabled ? " danger" : "")} disabled={busy || !state} onClick={toggle}>
         {busy ? "…" : state?.enabled ? "Turn off" : "Enable"}</button>
     </div></div>
+  );
+}
+
+// PairPhoneCard shows the QR to add a phone. The QR only exists on the
+// computer's own panel (it's a live credential served loopback-only),
+// so on a phone it explains where to find it instead of failing.
+function PairPhoneCard({ toast }: { toast: (m: string, ms?: number) => void }) {
+  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
+  const [n, setN] = useState(0); // bump to refresh the QR (new code)
+  if (!isLocal) {
+    return (
+      <div className="card"><div className="sub">To add a phone, open cuxdeck's panel <b>on the computer itself</b>
+        (menu-bar icon → “Open panel · pair a phone”). The scannable QR shows there.</div></div>
+    );
+  }
+  return (
+    <div className="card" style={{ textAlign: "center" }}>
+      <div className="sub" style={{ marginBottom: 10 }}>Scan with your phone's camera — it opens cuxdeck on your phone, already paired.</div>
+      <img src={"/local/qr.png?n=" + n} width={200} height={200} alt="pairing QR"
+        style={{ borderRadius: 14, background: "#fff", padding: 10 }} />
+      <div style={{ marginTop: 10 }}>
+        <button className="btn ghost small" onClick={() => { setN(n + 1); toast("Fresh QR — valid 10 minutes"); }}>↻ new QR</button>
+      </div>
+    </div>
+  );
+}
+
+// MachineNameCard renames a machine (overrides the OS hostname in the
+// fleet view). Blank restores the hostname.
+function MachineNameCard({ e, toast }: { e: Entry; toast: (m: string, ms?: number) => void }) {
+  const [name, setName] = useState("");
+  const [saved, setSaved] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api<{ name: string }>(e.deck, "/api/name").then((r) => { setName(r.name || ""); setSaved(r.name || ""); }).catch(() => {});
+  }, [e.deck]);
+  const save = async () => {
+    setBusy(true);
+    try {
+      await api(e.deck, "/api/name", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
+      setSaved(name.trim());
+      toast(name.trim() ? "Renamed to " + name.trim() : "Name reset to hostname");
+    } catch (err) { toast("Failed: " + (err as Error).message, 3600); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="card">
+      <div className="sub" style={{ marginBottom: 6 }}>Shown across your fleet. Currently <b>{machineName(e)}</b>{e.snap?.os ? " · " + e.snap.os : ""}.</div>
+      <div className="row" style={{ gap: 8 }}>
+        <input style={{ flex: 1, background: "var(--card)", border: "1px solid var(--line)", color: "var(--fg)", padding: "10px 12px", borderRadius: 11, outline: "none" }}
+          value={name} onChange={(ev) => setName(ev.target.value)} placeholder="e.g. mac-studio" autoCapitalize="none" spellCheck={false} />
+        <button className="btn small" disabled={busy || name.trim() === saved} onClick={save}>Save</button>
+      </div>
+    </div>
   );
 }
 
@@ -652,7 +723,8 @@ function TelegramCard({ fleet, toast, setSheet }: {
   };
   return (
     <div className="card"><div className="row">
-      <div className="grow"><h3>Telegram</h3>
+      <TelegramMark size={34} />
+      <div className="grow" style={{ marginLeft: 10 }}><h3>Telegram</h3>
         <div className="sub">{status?.linked
           ? "● linked — alerts also go to your Telegram chat"
           : "Get the same alerts in a Telegram chat that outlives any phone."}</div></div>
@@ -661,6 +733,31 @@ function TelegramCard({ fleet, toast, setSheet }: {
         : <button className="btn ghost small" onClick={() => setSheet(
           <TelegramWizard deck={deck} toast={toast} onDone={() => { setSheet(null); load(); }} />)}>connect</button>}
     </div></div>
+  );
+}
+
+// A numbered step with an illustrative visual — the "screenshot" is a
+// faithful mock of the Telegram chat, since a real screenshot can't be
+// embedded, but the layout matches what the user will see.
+function Step({ n, title, children }: { n: number; title: React.ReactNode; children?: React.ReactNode }) {
+  return (
+    <div className="tgstep">
+      <div className="tgnum">{n}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="tgtitle">{title}</div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// A tiny Telegram-style chat bubble mock used to illustrate each step.
+function TgBubble({ from, children }: { from?: string; children: React.ReactNode }) {
+  return (
+    <div className="tgchat">
+      {from && <div className="tgfrom">{from}</div>}
+      <div className="tgmsg">{children}</div>
+    </div>
   );
 }
 
@@ -681,8 +778,6 @@ function TelegramWizard({ deck, toast, onDone }: { deck: Deck; toast: (m: string
     finally { setBusy(false); }
   };
 
-  // After the token is set, poll getUpdates until the user's /start
-  // lands and cuxdeck captures the chat id.
   const startPolling = () => {
     if (polling.current) return;
     polling.current = true;
@@ -694,7 +789,7 @@ function TelegramWizard({ deck, toast, onDone }: { deck: Deck; toast: (m: string
         const { linked } = await api<{ linked: boolean }>(deck, "/api/telegram/poll", { method: "POST", body: "{}" });
         if (linked) { polling.current = false; toast("Telegram linked ✓"); onDone(); return; }
       } catch { /* keep trying */ }
-      if (tries < 60) setTimeout(tick, 2000); else { polling.current = false; toast("No message received — send your bot /start and retry"); }
+      if (tries < 90) setTimeout(tick, 2000); else { polling.current = false; toast("No message received — send your bot /start and retry"); }
     };
     setTimeout(tick, 1500);
   };
@@ -702,22 +797,47 @@ function TelegramWizard({ deck, toast, onDone }: { deck: Deck; toast: (m: string
 
   return (
     <>
-      <h2>Connect Telegram</h2>
+      <div className="row" style={{ gap: 10, marginBottom: 4 }}>
+        <TelegramMark size={30} />
+        <h2 style={{ margin: 0 }}>Connect Telegram</h2>
+      </div>
+      <div className="sheet-sub">Free, ~1 minute. You make a personal bot, then paste its token — alerts arrive as chat messages.</div>
+
       {step === 1 ? (
-        <>
-          <div className="sheet-sub">1. In Telegram, open <b>@BotFather</b> → <span className="mono">/newbot</span>, follow the prompts, and copy the token it gives you.</div>
-          <div className="field"><label>Bot token</label>
-            <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="123456:ABC-DEF…"
+        <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
+          <Step n={1} title={<>Open <b>BotFather</b> in Telegram</>}>
+            <div className="sub">Telegram's official bot for making bots — the blue ✓ verified one.</div>
+            {/* tg:// opens the installed Telegram app directly. We deliberately
+                avoid the t.me web link: some networks (Turkey among them) block
+                that domain at the DNS level, so it fails with NXDOMAIN even
+                though Telegram itself works fine. */}
+            <a className="btn small" style={{ display: "inline-block", marginTop: 6, textDecoration: "none" }}
+              href="tg://resolve?domain=BotFather">Open @BotFather in Telegram ›</a>
+            <div className="sub" style={{ marginTop: 6 }}>Button not working? Open Telegram and search <span className="mono">@BotFather</span> by hand.</div>
+          </Step>
+          <Step n={2} title={<>Send it <span className="mono">/newbot</span></>}>
+            <TgBubble from="You">/newbot</TgBubble>
+            <TgBubble from="BotFather">Alright, a new bot. How are we going to call it? Please choose a name…</TgBubble>
+            <div className="sub" style={{ marginTop: 4 }}>Answer its two questions: a name (anything, e.g. <i>my cuxdeck</i>) and a username ending in <span className="mono">bot</span> (e.g. <span className="mono">oguz_cuxdeck_bot</span>).</div>
+          </Step>
+          <Step n={3} title={<>Copy the token it sends back</>}>
+            <TgBubble from="BotFather">Done! Use this token to access the HTTP API:<br /><span className="mono" style={{ color: "var(--acc)" }}>7654321:AAH<span style={{ opacity: .6 }}>Ex4mpl3-tok3n-k33p-secret</span></span></TgBubble>
+          </Step>
+          <div className="field" style={{ marginTop: 12 }}><label>Paste the bot token here</label>
+            <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="7654321:AAH…"
               autoCapitalize="none" autoComplete="off" spellCheck={false} /></div>
-          <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={saveToken}>{busy ? "Checking…" : "Save token"}</button>
-        </>
+          <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={saveToken}>{busy ? "Checking token…" : "Save & continue"}</button>
+        </div>
       ) : (
-        <>
-          <div className="sheet-sub">2. Now open your bot in Telegram and tap <b>Start</b> (or send it any message). Waiting for it to arrive…</div>
-          <div className="cstat" style={{ justifyContent: "center", padding: "18px 0" }}>
-            <span className="spin">✳</span> listening for your message
+        <div>
+          <Step n={4} title={<>Open your new bot and tap <b>Start</b></>}>
+            <div className="sub">Find it by the username you chose, open the chat, and press the big <b>Start</b> button (or send any message). That's how it learns where to send your alerts.</div>
+            <div className="tgstart">▶  START</div>
+          </Step>
+          <div className="cstat" style={{ justifyContent: "center", padding: "16px 0" }}>
+            <span className="spin">✳</span> waiting for your message…
           </div>
-        </>
+        </div>
       )}
     </>
   );
@@ -838,9 +958,15 @@ function InviteSheet({ e, toast }: { e: Entry; toast: (m: string, ms?: number) =
     if (busy) return;
     setBusy(true);
     try {
-      const { code } = await api<{ code: string }>(e.deck, "/api/invite", { method: "POST", body: JSON.stringify({ role }) });
-      const origin = e.deck.url || location.origin;
-      setLink(origin.replace(/\/$/, "") + "/#p=" + code);
+      // The server hands back the public tunnel URL — a teammate can't
+      // reach localhost, so never build the link from this origin.
+      const { code, url } = await api<{ code: string; url: string }>(e.deck, "/api/invite", { method: "POST", body: JSON.stringify({ role }) });
+      const origin = (url || e.deck.url || location.origin).replace(/\/$/, "");
+      if (!/^https:\/\//.test(origin)) {
+        toast("This machine has no public tunnel yet — can't invite remotely", 4000);
+        return;
+      }
+      setLink(origin + "/#p=" + code);
     } catch (err) { toast("Failed: " + (err as Error).message, 3600); }
     finally { setBusy(false); }
   };
