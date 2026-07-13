@@ -586,14 +586,25 @@ function StartupCard({ e, label, toast }: { e: Entry; label: string; toast: (m: 
 function NotifyCard({ fleet, toast }: { fleet: Entry[]; toast: (m: string, ms?: number) => void }) {
   const [on, setOn] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
-  useEffect(() => { push.isEnabled().then(setOn); }, []);
+  const online = fleet.filter((e) => e.online);
+  // On load, if this browser already holds a subscription, re-register
+  // it with every reachable deck — so a re-pair or a daemon restart
+  // doesn't leave the toggle stuck on "Enable" while notifications are
+  // actually still live in the browser.
+  useEffect(() => {
+    (async () => {
+      if (!(await push.isEnabled())) { setOn(false); return; }
+      for (const e of online) await push.resync(e.deck).catch(() => {});
+      setOn(true);
+    })();
+    // re-run when the set of reachable decks changes
+  }, [online.map((e) => e.deck.url).join(",")]);
   const supported = push.pushSupported();
 
   const toggle = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      const online = fleet.filter((e) => e.online);
       if (on) {
         for (const e of online) await push.disable(e.deck);
         setOn(false); toast("Notifications off");

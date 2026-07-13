@@ -57,3 +57,24 @@ export async function isEnabled(): Promise<boolean> {
   const reg = await navigator.serviceWorker.getRegistration();
   return !!(reg && (await reg.pushManager.getSubscription()));
 }
+
+// resync repairs the backend for a deck that lost this browser's
+// subscription — after a re-pair (new device token) or a daemon
+// restart, the browser still holds a valid subscription but the deck
+// no longer has it on file. Re-posting it (idempotent) makes "enabled"
+// mean the same thing on both sides again. Returns whether this
+// browser is subscribed at all (so the toggle shows the true state).
+export async function resync(deck: Deck): Promise<boolean> {
+  if (!pushSupported()) return false;
+  const reg = await navigator.serviceWorker.getRegistration();
+  const sub = reg && (await reg.pushManager.getSubscription());
+  if (!sub) return false;
+  try {
+    await fetch(httpBase(deck, "/api/push/subscribe"), {
+      method: "POST",
+      headers: { Authorization: "Bearer " + deck.token, "Content-Type": "application/json" },
+      body: JSON.stringify(sub),
+    });
+  } catch { /* best-effort; still enabled in the browser */ }
+  return true;
+}
