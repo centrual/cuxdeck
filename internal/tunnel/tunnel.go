@@ -9,6 +9,7 @@ package tunnel
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -105,6 +106,15 @@ func (m *Manager) EnsureBinary(ctx context.Context) error {
 	}
 	if err := os.Chmod(tmp, 0o700); err != nil {
 		return err
+	}
+	// Sanity-check the download actually runs (right arch, not a
+	// truncated/HTML error body) before we commit it to the real path.
+	// Cloudflare doesn't publish a stable checksum for the `latest`
+	// asset, so this is the practical guard: a binary that answers
+	// `--version` is the one we want; a corrupt one is discarded.
+	vc := exec.CommandContext(ctx, tmp, "--version")
+	if out, err := vc.CombinedOutput(); err != nil || !bytes.Contains(bytes.ToLower(out), []byte("cloudflared")) {
+		return fmt.Errorf("tunnel: downloaded cloudflared failed self-check (corrupt or wrong platform)")
 	}
 	return os.Rename(tmp, m.binaryPath())
 }

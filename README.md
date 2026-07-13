@@ -111,7 +111,8 @@ party who can see your data. If a step can be removed, it will be.
   heartbeat registry) and shells out to the `cux` CLI for every action, so
   all the rules stay in cux. It never opens a listening port to the world.
 - **Remote access, accountless** — cuxdeck downloads and supervises
-  `cloudflared` (checksum-verified, kept under `~/.cuxdeck/bin`) and opens a
+  `cloudflared` (over TLS from Cloudflare's official GitHub releases, self-checked
+  by running it, kept under `~/.cuxdeck/bin`) and opens a
   [Quick Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/):
   a random `https://….trycloudflare.com` address, **no Cloudflare account
   required**. If the tunnel drops, cuxdeck rebuilds it and pushes your phone
