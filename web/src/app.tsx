@@ -506,6 +506,10 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
 }) {
   return (
     <>
+      <div className="section-label">Startup</div>
+      {fleet.filter((e) => e.online && canControl(e)).map((e) => (
+        <StartupCard key={e.deck.id} e={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} />
+      ))}
       <div className="section-label">Notifications</div>
       <NotifyCard fleet={fleet} toast={toast} />
       <TelegramCard fleet={fleet} toast={toast} setSheet={setSheet} />
@@ -543,6 +547,36 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
           separate deck with its own tunnel and token. Add another with its pairing link; forget it to drop it.</div>
       </div>
     </>
+  );
+}
+
+// StartupCard toggles start-at-login for one machine, remotely — the
+// same switch as the tray's "Start at login", reachable from the phone.
+function StartupCard({ e, label, toast }: { e: Entry; label: string; toast: (m: string, ms?: number) => void }) {
+  const [state, setState] = useState<{ supported: boolean; enabled: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => {
+    api<{ supported: boolean; enabled: boolean }>(e.deck, "/api/service").then(setState).catch(() => {});
+  }, [e.deck]);
+  useEffect(load, [load]);
+  if (state && !state.supported) return null;
+  const toggle = async () => {
+    if (busy || !state) return;
+    setBusy(true);
+    try {
+      await api(e.deck, "/api/service", { method: "POST", body: JSON.stringify({ enabled: !state.enabled }) });
+      setState({ ...state, enabled: !state.enabled });
+      toast(!state.enabled ? "Will start at login" : "Won't start at login");
+    } catch (err) { toast("Failed: " + (err as Error).message, 3600); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="card"><div className="row">
+      <div className="grow"><h3>Start at login{label ? " · " + label : ""}</h3>
+        <div className="sub">{state?.enabled ? "● launches when the computer starts" : "Launch cuxdeck automatically on boot."}</div></div>
+      <button className={"btn small" + (state?.enabled ? " danger" : "")} disabled={busy || !state} onClick={toggle}>
+        {busy ? "…" : state?.enabled ? "Turn off" : "Enable"}</button>
+    </div></div>
   );
 }
 

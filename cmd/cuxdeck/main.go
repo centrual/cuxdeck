@@ -131,7 +131,15 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 	notifiers = append(notifiers, tgStore)
 	go watch.Run(notifiers, 5*time.Second)
 
-	srv := &server.Server{Auth: st, Push: pushStore, TG: tgStore, Usage: usageStore, Version: version}
+	srv := &server.Server{Auth: st, Push: pushStore, TG: tgStore, Usage: usageStore, Version: version,
+		StartAtLoginState: serviceInstalled,
+		SetStartAtLogin: func(on bool) error {
+			if on {
+				return installService()
+			}
+			return uninstallService()
+		},
+	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cuxdeck:", err)

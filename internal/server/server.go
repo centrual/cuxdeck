@@ -36,6 +36,10 @@ type Server struct {
 	TG      *telegram.Store
 	Usage   *usagelog.Store
 	Version string
+	// StartAtLogin state + toggle, injected from main (which owns the
+	// OS-specific service code). Nil when unavailable.
+	StartAtLoginState func() bool
+	SetStartAtLogin   func(on bool) error
 }
 
 // Handler returns the full route table.
@@ -62,6 +66,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/telegram/poll", s.authed(s.tgPoll))
 	mux.HandleFunc("POST /api/telegram/disconnect", s.authed(s.tgDisconnect))
 	mux.HandleFunc("GET /api/usage/history", s.authed(s.usageHistory))
+	mux.HandleFunc("GET /api/service", s.authed(s.serviceGet))
+	mux.HandleFunc("POST /api/service", s.controlled(s.serviceSet))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
 	return securityHeaders(mux)
 }
@@ -318,6 +324,33 @@ func (s *Server) tgDisconnect(w http.ResponseWriter, r *http.Request) {
 		s.TG.Disconnect()
 	}
 	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func (s *Server) serviceGet(w http.ResponseWriter, r *http.Request) {
+	if s.StartAtLoginState == nil {
+		writeJSON(w, map[string]any{"supported": false, "enabled": false})
+		return
+	}
+	writeJSON(w, map[string]any{"supported": true, "enabled": s.StartAtLoginState()})
+}
+
+func (s *Server) serviceSet(w http.ResponseWriter, r *http.Request) {
+	if s.SetStartAtLogin == nil {
+		http.Error(w, `{"error":"not supported here"}`, http.StatusServiceUnavailable)
+		return
+	}
+	var in struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	if err := s.SetStartAtLogin(in.Enabled); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]bool{"enabled": in.Enabled})
 }
 
 func (s *Server) usageHistory(w http.ResponseWriter, r *http.Request) {
