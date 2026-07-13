@@ -131,6 +131,12 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 	notifiers = append(notifiers, tgStore)
 	go watch.Run(notifiers, 5*time.Second)
 
+	curURL := func() string {
+		if b, err := os.ReadFile(filepath.Join(home(), "current-url")); err == nil && len(b) > 0 {
+			return string(b)
+		}
+		return ""
+	}
 	srv := &server.Server{Auth: st, Push: pushStore, TG: tgStore, Usage: usageStore, Version: version,
 		StartAtLoginState: serviceInstalled,
 		SetStartAtLogin: func(on bool) error {
@@ -139,6 +145,7 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 			}
 			return uninstallService()
 		},
+		CurrentURL: curURL,
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {

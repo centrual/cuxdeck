@@ -22,6 +22,7 @@ import (
 	"github.com/centrual/cuxdeck/internal/spawn"
 	"github.com/centrual/cuxdeck/internal/telegram"
 	"github.com/centrual/cuxdeck/internal/usagelog"
+	qrcode "github.com/skip2/go-qrcode"
 )
 
 //go:generate go run ../../tools/buildweb
@@ -40,6 +41,9 @@ type Server struct {
 	// OS-specific service code). Nil when unavailable.
 	StartAtLoginState func() bool
 	SetStartAtLogin   func(on bool) error
+	// CurrentURL returns the public tunnel URL (or the local one) so the
+	// loopback pairing QR points a phone at the right address.
+	CurrentURL func() string
 }
 
 // Handler returns the full route table.
@@ -69,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/service", s.authed(s.serviceGet))
 	mux.HandleFunc("POST /api/service", s.controlled(s.serviceSet))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
+	mux.HandleFunc("GET /local/qr.png", s.localOnly(s.pairingQR))
 	return securityHeaders(mux)
 }
 
@@ -420,6 +425,28 @@ func (s *Server) localOnly(next http.HandlerFunc) http.HandlerFunc {
 
 // newPairing mints a fresh single-use code for `cuxdeck qr` and the
 // menu bar's pair action.
+// pairingQR renders a fresh single-use pairing QR as a PNG, for the
+// loopback panel to show ("scan with your phone"). It encodes the
+// public URL so the scanning phone lands on the tunnel, not localhost.
+// localOnly — the QR (a live credential) is never reachable remotely.
+func (s *Server) pairingQR(w http.ResponseWriter, r *http.Request) {
+	base := "http://" + r.Host
+	if s.CurrentURL != nil {
+		if u := s.CurrentURL(); u != "" {
+			base = u
+		}
+	}
+	code := s.Auth.NewPairingCode(auth.RoleControl)
+	png, err := qrcode.Encode(base+"/#p="+code, qrcode.Medium, 512)
+	if err != nil {
+		http.Error(w, "qr error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(png)
+}
+
 func (s *Server) newPairing(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"code": s.Auth.NewPairingCode(auth.RoleControl)})
 }

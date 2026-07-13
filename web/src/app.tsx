@@ -916,13 +916,21 @@ function SeatSheet({ project, snap, deck, toast, refresh, act, close }: {
 
 /* ---------- pairing (first deck, this origin) ---------- */
 
+// On this computer (loopback) the pairing code is already ours to
+// mint, so the panel shows a QR to scan with a phone plus a one-tap
+// "pair this computer" — no code to copy anywhere. On a phone (opened
+// via the scanned link) the URL carries the code and it pairs itself;
+// a manual code box is the cameraless fallback.
 function Pair({ onPaired }: { onPaired: () => void }) {
+  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
   const [code, setCode] = useState(() => {
     const m = location.hash.match(/p=([A-Z0-9]+)/i);
     return m ? m[1].toUpperCase() : "";
   });
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const tried = useRef(false);
+
   const go = useCallback(async (c: string) => {
     if (!c) return;
     setErr("");
@@ -933,15 +941,43 @@ function Pair({ onPaired }: { onPaired: () => void }) {
       onPaired();
     } catch { setErr("Invalid or expired code — generate a fresh one on the computer."); }
   }, [onPaired]);
+
+  // Phone arriving via a scanned link: pair automatically.
   useEffect(() => { if (code && !tried.current) { tried.current = true; go(code); } }, [code, go]);
+
+  // "Pair this computer": mint a loopback code and pair in one tap.
+  const pairSelf = useCallback(async () => {
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch("/local/pairing", { method: "POST" });
+      const { code } = await r.json();
+      await go(code);
+    } catch { setErr("Couldn't pair — is the daemon running?"); }
+    finally { setBusy(false); }
+  }, [go]);
+
   return (
     <div id="pair">
       <div className="logo" style={{ width: 118, height: 104 }}><Mascot size={98} /></div>
       <h2 className="mono">cuxdeck<span className="cur">_</span></h2>
-      <p>Enter the pairing code shown on your computer to link this device. One scan, one device — that's the whole setup.</p>
-      <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="··········"
-        autoComplete="off" autoCapitalize="characters" spellCheck={false} />
-      <button className="btn" style={{ width: 250 }} onClick={() => go(code.trim())}>Pair this device</button>
+      {isLocal ? (
+        <>
+          <p>Scan this with your phone to add it — or pair this computer with one tap.</p>
+          <img src="/local/qr.png" width={220} height={220} alt="pairing QR"
+            style={{ borderRadius: 16, background: "#fff", padding: 10 }}
+            onError={(e) => { (e.currentTarget.style.display = "none"); }} />
+          <button className="btn" style={{ width: 250 }} disabled={busy} onClick={pairSelf}>
+            {busy ? "…" : "Pair this computer"}</button>
+          <div className="sub" style={{ fontSize: 12 }}>The QR opens the phone straight onto your tunnel — no code to type.</div>
+        </>
+      ) : (
+        <>
+          <p>Enter the pairing code shown on your computer, or scan its QR. One device, one code — that's the whole setup.</p>
+          <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="··········"
+            autoComplete="off" autoCapitalize="characters" spellCheck={false} />
+          <button className="btn" style={{ width: 250 }} onClick={() => go(code.trim())}>Pair this device</button>
+        </>
+      )}
       <div id="pairErr">{err}</div>
     </div>
   );
