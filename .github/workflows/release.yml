@@ -1,0 +1,215 @@
+# Cuts a cuxdeck release when a v* tag is pushed: builds a native binary
+# for every platform (macOS universal .app + .dmg, Linux amd64/arm64,
+# Windows amd64), publishes a GitHub Release with checksums, and — if a
+# tap token is configured — bumps the Homebrew cask.
+#
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# The version is stamped into the binary from the tag (main.version), so
+# `cuxdeck version` reports the released number.
+#
+# Note on injection safety: the tag / dispatch input is untrusted, so it
+# never appears inline in a run: block. Each job resolves it once into a
+# step output via an env var, and every later step consumes that output
+# through its own env var — never `${{ ... }}` spliced into shell.
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Version tag to build (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  GO_VERSION: "1.23"
+
+jobs:
+  # macOS: a universal (arm64 + amd64) menu-bar .app, shipped as both a
+  # drag-to-Applications .dmg and a .zip. The tray needs CGO, so this
+  # runs on a real macOS runner where the Xcode toolchain is present.
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}" }
+      - name: Resolve version
+        id: v
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Build web bundle
+        run: go run ./tools/buildweb
+      - name: Build cuxdeck.app (universal)
+        env:
+          CGO_ENABLED: "1"
+          VERSION: ${{ steps.v.outputs.version }}
+        run: bash packaging/make-macos-app.sh "$VERSION"
+      - name: Package .dmg and .zip
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          ditto -c -k --keepParent dist/cuxdeck.app "dist/cuxdeck-$VERSION-darwin-universal.zip"
+          hdiutil create -volname cuxdeck -srcfolder dist/cuxdeck.app \
+            -ov -format UDZO "dist/cuxdeck-$VERSION-darwin-universal.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            dist/*.dmg
+            dist/*.zip
+
+  # Linux: static (CGO-free) binaries for amd64 and arm64. The tray falls
+  # back cleanly here, and the CLI/daemon is the primary use anyway.
+  linux:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}" }
+      - name: Resolve version
+        id: v
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Build web bundle
+        run: go run ./tools/buildweb
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          go build -ldflags "-s -w -X main.version=$VERSION" -o cuxdeck ./cmd/cuxdeck
+          tar -czf "cuxdeck-$VERSION-linux-$GOARCH.tar.gz" cuxdeck
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: "*.tar.gz"
+
+  # Windows: amd64 binary in a zip.
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version: "${{ env.GO_VERSION }}" }
+      - name: Resolve version
+        id: v
+        shell: bash
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
+      - name: Build web bundle
+        run: go run ./tools/buildweb
+      - name: Build
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+          GOOS: windows
+          GOARCH: amd64
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          go build -ldflags "-s -w -X main.version=$VERSION" -o cuxdeck.exe ./cmd/cuxdeck
+          7z a "cuxdeck-$VERSION-windows-amd64.zip" cuxdeck.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: "*.zip"
+
+  # Gather every platform's artifacts, checksum them, and publish the
+  # GitHub Release.
+  release:
+    needs: [macos, linux, windows]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - name: Resolve version
+        id: v
+        env:
+          RAW_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts }
+      - name: Collect and checksum
+        run: |
+          mkdir -p dist
+          find artifacts -type f \( -name '*.dmg' -o -name '*.zip' -o -name '*.tar.gz' \) -exec cp {} dist/ \;
+          cd dist && shasum -a 256 * > checksums.txt && cat checksums.txt
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release create "$TAG" dist/* \
+            --repo "$REPO" \
+            --title "cuxdeck $TAG" \
+            --generate-notes
+
+  # Bump the Homebrew cask in centrual/homebrew-tap. Skipped unless a
+  # TAP_TOKEN secret (a PAT with contents:write on the tap) is set, so the
+  # release itself never blocks on it.
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() && needs.release.result == 'success' }}
+    steps:
+      - name: Update cask
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_TOKEN }}
+          VERSION: ${{ needs.release.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$TAP_TOKEN" ]; then
+            echo "TAP_TOKEN not set — skipping Homebrew bump."
+            echo "Set it (a PAT with contents:write on centrual/homebrew-tap) to automate this."
+            exit 0
+          fi
+          DMG="cuxdeck-$VERSION-darwin-universal.dmg"
+          URL="https://github.com/$REPO/releases/download/v$VERSION/$DMG"
+          curl -fsSL "$URL" -o "$DMG"
+          SHA=$(shasum -a 256 "$DMG" | awk '{print $1}')
+          git clone "https://x-access-token:$TAP_TOKEN@github.com/centrual/homebrew-tap.git" tap
+          mkdir -p tap/Casks
+          # REPO/VERSION/SHA come from env (trusted: derived from the tag),
+          # interpolated into the .rb via a quoted heredoc.
+          cat > tap/Casks/cuxdeck.rb <<RUBY
+          cask "cuxdeck" do
+            version "$VERSION"
+            sha256 "$SHA"
+
+            url "https://github.com/$REPO/releases/download/v#{version}/cuxdeck-#{version}-darwin-universal.dmg"
+            name "cuxdeck"
+            desc "Mission control for your cux fleet — a menu-bar app"
+            homepage "https://github.com/$REPO"
+
+            app "cuxdeck.app"
+
+            zap trash: [
+              "~/.cuxdeck",
+              "~/Library/LaunchAgents/com.centrual.cuxdeck.plist",
+            ]
+          end
+          RUBY
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Casks/cuxdeck.rb
+          git commit -m "cuxdeck $VERSION"
+          git push

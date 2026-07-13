@@ -79,9 +79,10 @@ already in your hand.
 
 ## What it feels like to use
 
-1. **Install** cuxdeck on each machine (`go build`, and soon dmg / Homebrew).
-2. **Run `cuxdeck install`.** It starts with the computer from then on, prints
-   a pairing QR, and needs no configuration. (A menu-bar tray icon is next.)
+1. **Install** cuxdeck on each machine (see [Install](#install) below —
+   Homebrew, a signed-less `.dmg`, a prebuilt binary, or `go build`).
+2. **Run it** — it lives in the menu bar. `cuxdeck install` makes it start with
+   the computer; from then on it prints a pairing QR and needs no configuration.
 3. **Scan the QR.** That machine is now on your phone — live sessions, seat
    usage, projects, and its terminals. Scan the next machine's QR and it joins
    the same fleet view.
@@ -89,6 +90,31 @@ already in your hand.
 
 No sign-ups. No tokens to copy by hand. No VPN client on the phone. No third
 party who can see your data. If a step can be removed, it will be.
+
+## Install
+
+**macOS — Homebrew** (menu-bar app):
+
+```
+brew install --cask centrual/tap/cuxdeck
+```
+
+**macOS — direct**: grab `cuxdeck-<version>-darwin-universal.dmg` from the
+[latest release](https://github.com/centrual/cuxdeck/releases/latest), open it,
+and drag cuxdeck to Applications. It's ad-hoc signed, so the first launch is
+right-click → Open.
+
+**Linux / Windows**: download the matching archive from the
+[releases page](https://github.com/centrual/cuxdeck/releases/latest) and put the
+binary on your `PATH`.
+
+**From source** (any platform with Go 1.23+):
+
+```
+go install github.com/centrual/cuxdeck/cmd/cuxdeck@latest
+```
+
+Every release ships a `checksums.txt`; verify with `shasum -a 256 -c`.
 
 ## How it works
 
@@ -159,12 +185,12 @@ party who can see your data. If a step can be removed, it will be.
 |---|---|---|
 | **v1** | daemon + mobile panel (sessions · seats · projects, view & manage) · QR device pairing · accountless tunnel supervisor · start-at-login | ✅ shipped |
 | **v2** | multi-machine fleet view (one phone, many decks) · read-only live conversation view · full remote terminal · start a session remotely · Web Push events · Telegram connect wizard | ✅ shipped |
-| **v3** | per-seat utilization trend charts · shared team decks (invite with view / control) | ✅ shipped |
-| next | menu-bar tray icon · `.dmg` / Homebrew packaging · usage cost (once a price signal exists) | planned |
+| **v3** | per-seat utilization trend charts · shared team decks (invite with view / control) · menu-bar tray icon · `.dmg` / Homebrew packaging + cross-platform releases | ✅ shipped |
+| next | usage cost (once a price signal exists) · a stable named tunnel option · notarized macOS build | planned |
 
-> **Status: usable, early.** The experience above is real today — pair a phone,
-> watch and drive your fleet, from anywhere. A tray icon and packaging are what's
-> left before a 1.0 tag. Watch the repo — it's moving fast.
+> **Status: usable.** The experience above is real today — install from Homebrew,
+> pair a phone, watch and drive your fleet from anywhere. Watch the repo — it's
+> moving fast.
 
 ## Requirements
 

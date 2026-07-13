@@ -10,8 +10,8 @@ APP="dist/cuxdeck.app"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 echo "building universal binary…"
-GOOS=darwin GOARCH=arm64 /opt/homebrew/bin/go build -ldflags "-X main.version=$VERSION" -o /tmp/cuxdeck-arm64 ./cmd/cuxdeck
-if GOOS=darwin GOARCH=amd64 /opt/homebrew/bin/go build -ldflags "-X main.version=$VERSION" -o /tmp/cuxdeck-amd64 ./cmd/cuxdeck 2>/dev/null; then
+GOOS=darwin GOARCH=arm64 "${GO:-go}" build -ldflags "-X main.version=$VERSION" -o /tmp/cuxdeck-arm64 ./cmd/cuxdeck
+if GOOS=darwin GOARCH=amd64 "${GO:-go}" build -ldflags "-X main.version=$VERSION" -o /tmp/cuxdeck-amd64 ./cmd/cuxdeck 2>/dev/null; then
   lipo -create -output "$APP/Contents/MacOS/cuxdeck" /tmp/cuxdeck-arm64 /tmp/cuxdeck-amd64
   echo "  universal (arm64 + amd64)"
 else
@@ -22,7 +22,7 @@ chmod +x "$APP/Contents/MacOS/cuxdeck"
 
 echo "rendering app icon…"
 if command -v rsvg-convert >/dev/null 2>&1 || command -v sips >/dev/null 2>&1; then
-  /opt/homebrew/bin/go run ./packaging/render-icns.go assets/onion.svg "$APP/Contents/Resources/cuxdeck.icns" 2>/dev/null \
+  "${GO:-go}" run ./packaging/render-icns.go assets/onion.svg "$APP/Contents/Resources/cuxdeck.icns" 2>/dev/null \
     && echo "  icon set" || echo "  icon skipped (renderer unavailable)"
 fi
 
