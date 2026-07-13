@@ -62,10 +62,16 @@ type Store struct {
 	mu       sync.Mutex
 	path     string
 	devices  []Device
-	pairing  string    // active single-use code, "" when none
-	pairRole string    // role the active code will grant
-	pairExp  time.Time // when the active code dies
-	failures int       // consecutive bad tokens → linear backoff
+	pairings map[string]pairEntry // active single-use codes, keyed by code
+	failures int                  // consecutive bad tokens → linear backoff
+}
+
+// pairEntry is one outstanding pairing code: the role it grants and when
+// it expires. Codes live only in memory — short-lived secrets never
+// touch disk — so a daemon restart naturally clears them.
+type pairEntry struct {
+	role string
+	exp  time.Time
 }
 
 // Open loads (or initialises) the device store at dir/devices.json.
@@ -93,20 +99,35 @@ func (s *Store) save() {
 	_ = os.Rename(tmp, s.path)
 }
 
-// NewPairingCode invalidates any previous code and returns a fresh
-// one: 10 chars of crockford-ish base32, comfortable to type by hand
-// when there is no camera, ~50 bits — plenty for a 10-minute window
-// behind exponential backoff.
+// NewPairingCode returns a fresh single-use code: 10 chars of
+// crockford-ish base32, comfortable to type by hand when there is no
+// camera, ~50 bits — plenty for a 10-minute window behind exponential
+// backoff. Multiple codes can be outstanding at once: the menu bar, the
+// panel's "add a phone" card, and the tunnel banner each mint their own,
+// and a fresh mint must NOT invalidate a code a phone is mid-scan on.
 func (s *Store) NewPairingCode(role string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.prunePairings()
 	raw := make([]byte, 7)
 	_, _ = rand.Read(raw)
 	code := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw)[:10]
-	s.pairing = code
-	s.pairRole = normRole(role)
-	s.pairExp = time.Now().Add(pairingTTL)
+	if s.pairings == nil {
+		s.pairings = make(map[string]pairEntry)
+	}
+	s.pairings[code] = pairEntry{role: normRole(role), exp: time.Now().Add(pairingTTL)}
 	return code
+}
+
+// prunePairings drops expired codes so the map can't grow without bound.
+// Callers must hold s.mu.
+func (s *Store) prunePairings() {
+	now := time.Now()
+	for c, e := range s.pairings {
+		if now.After(e.exp) {
+			delete(s.pairings, c)
+		}
+	}
 }
 
 // ErrBadPairing is returned for unknown, expired, or reused codes.
@@ -117,12 +138,13 @@ var ErrBadPairing = errors.New("auth: invalid or expired pairing code")
 func (s *Store) Pair(code, name string) (token string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.pairing == "" || time.Now().After(s.pairExp) ||
-		subtle.ConstantTimeCompare([]byte(code), []byte(s.pairing)) != 1 {
+	s.prunePairings()
+	entry, ok := s.pairings[code]
+	if !ok || time.Now().After(entry.exp) {
 		return "", ErrBadPairing
 	}
-	role := normRole(s.pairRole)
-	s.pairing = "" // single use
+	role := normRole(entry.role)
+	delete(s.pairings, code) // single use
 
 	rawTok := make([]byte, 32)
 	if _, err := rand.Read(rawTok); err != nil {
