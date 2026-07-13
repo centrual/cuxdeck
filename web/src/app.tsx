@@ -380,9 +380,37 @@ function MachineFooter({ snap, onRefreshUsage }: { snap: Snapshot; onRefreshUsag
   );
 }
 
+// Spark is a bare utilization trend line — one series, so no legend and
+// no axes; the surrounding card already says whose it is. cux-orange,
+// thin, anchored to a 0–100 baseline, with a dot on the latest point.
+function Spark({ pts }: { pts: number[] }) {
+  if (pts.length < 2) return null;
+  const W = 100, H = 28;
+  const n = pts.length;
+  const x = (i: number) => (i / (n - 1)) * W;
+  const y = (v: number) => H - (Math.max(0, Math.min(100, v)) / 100) * (H - 3) - 1.5;
+  const line = pts.map((v, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(v).toFixed(1)).join(" ");
+  const area = "M0 " + H + " " + line.replace(/^M/, "L") + " L" + W + " " + H + " Z";
+  const last = pts[n - 1];
+  const col = last >= 90 ? "var(--bad)" : last >= 70 ? "var(--warn)" : "var(--acc)";
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 28, display: "block" }}>
+      <path d={area} fill={col} opacity={0.12} />
+      <path d={line} fill="none" stroke={col} strokeWidth={1.6} vectorEffect="non-scaling-stroke"
+        strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={x(n - 1)} cy={y(last)} r={2} fill={col} />
+    </svg>
+  );
+}
+
 function SeatsBlock({ e, showHeader, onSwitch }: { e: Entry; showHeader: boolean; onSwitch: (a: Account) => void }) {
   const snap = e.snap;
   const accts = snap ? Object.values(snap.accounts || {}).sort((a, b) => a.slot - b.slot) : [];
+  const [hist, setHist] = useState<Record<string, Array<{ five: number }>>>({});
+  useEffect(() => {
+    if (!e.online) return;
+    api<Record<string, Array<{ five: number }>>>(e.deck, "/api/usage/history").then(setHist).catch(() => {});
+  }, [e.deck, e.online]);
   return (
     <>
       {showHeader ? <MachineHeader e={e} /> : <div className="section-label">Seats</div>}
@@ -415,6 +443,12 @@ function SeatsBlock({ e, showHeader, onSwitch }: { e: Entry; showHeader: boolean
                 </div>
                 {resets.length > 0 && <div className="sub" style={{ textAlign: "center", marginTop: 6, paddingBottom: 4 }}>⏳ {resets.join(" · ")}</div>}
                 {u.token_expired && <div className="sub" style={{ color: "var(--bad)", textAlign: "center" }}>⚠ needs login on the computer</div>}
+                {(hist[cacheKey(a)]?.length ?? 0) >= 2 && (
+                  <div style={{ marginTop: 4 }}>
+                    <div className="sub" style={{ fontSize: 10.5, marginBottom: 2 }}>5H TREND</div>
+                    <Spark pts={hist[cacheKey(a)].map((p) => p.five)} />
+                  </div>
+                )}
               </>
             ) : <div className="sub">no usage data yet — tap refresh on the Deck tab</div>}
           </div>

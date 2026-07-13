@@ -21,6 +21,7 @@ import (
 	"github.com/centrual/cuxdeck/internal/push"
 	"github.com/centrual/cuxdeck/internal/spawn"
 	"github.com/centrual/cuxdeck/internal/telegram"
+	"github.com/centrual/cuxdeck/internal/usagelog"
 )
 
 //go:generate go run ../../tools/buildweb
@@ -33,6 +34,7 @@ type Server struct {
 	Auth    *auth.Store
 	Push    *push.Store
 	TG      *telegram.Store
+	Usage   *usagelog.Store
 	Version string
 }
 
@@ -57,6 +59,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/telegram/token", s.authed(s.tgToken))
 	mux.HandleFunc("POST /api/telegram/poll", s.authed(s.tgPoll))
 	mux.HandleFunc("POST /api/telegram/disconnect", s.authed(s.tgDisconnect))
+	mux.HandleFunc("GET /api/usage/history", s.authed(s.usageHistory))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
 	return securityHeaders(mux)
 }
@@ -295,6 +298,14 @@ func (s *Server) tgDisconnect(w http.ResponseWriter, r *http.Request) {
 		s.TG.Disconnect()
 	}
 	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func (s *Server) usageHistory(w http.ResponseWriter, r *http.Request) {
+	if s.Usage == nil {
+		writeJSON(w, map[string]any{})
+		return
+	}
+	writeJSON(w, s.Usage.History())
 }
 
 func (s *Server) devices(w http.ResponseWriter, r *http.Request) {

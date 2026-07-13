@@ -26,6 +26,7 @@ import (
 	"github.com/centrual/cuxdeck/internal/server"
 	"github.com/centrual/cuxdeck/internal/telegram"
 	"github.com/centrual/cuxdeck/internal/tunnel"
+	"github.com/centrual/cuxdeck/internal/usagelog"
 	"github.com/centrual/cuxdeck/internal/watch"
 	qrcode "github.com/skip2/go-qrcode"
 )
@@ -88,6 +89,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "cuxdeck: push disabled:", perr)
 	}
 	tgStore := telegram.Open(home())
+	usageStore := usagelog.Open(home())
+	go usageStore.Run(5 * time.Minute)
 	var notifiers []notify.Notifier
 	if pushStore != nil {
 		notifiers = append(notifiers, pushStore)
@@ -95,7 +98,7 @@ func main() {
 	notifiers = append(notifiers, tgStore)
 	go watch.Run(notifiers, 5*time.Second)
 
-	srv := &server.Server{Auth: st, Push: pushStore, TG: tgStore, Version: version}
+	srv := &server.Server{Auth: st, Push: pushStore, TG: tgStore, Usage: usageStore, Version: version}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cuxdeck:", err)
