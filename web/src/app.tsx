@@ -174,6 +174,23 @@ function DeckTab({ deck, convs, onOpenSession, onOpenConv, onOpenTerm, onRefresh
   const stateColor: Record<string, string> = {
     running: "var(--ok)", "waiting-reset": "var(--warn)", retrying: "var(--bad)", swapping: "var(--info)",
   };
+
+  // A running cux session and its transcript are one thing, not two:
+  // pair each session with its conversation (by session id when the
+  // registry has it, else the freshest unclaimed live transcript in
+  // the same directory). The session card then carries the
+  // conversation's title, and the paired transcript disappears from
+  // the list below — no more seeing yourself twice.
+  const claimed = new Set<string>();
+  const convFor = (s: Session): Conv | undefined => {
+    let c = s.sessionId ? convs.find((x) => x.id === s.sessionId) : undefined;
+    c = c || convs.find((x) => x.active && !claimed.has(x.id) && x.cwd === s.cwd);
+    if (c) claimed.add(c.id);
+    return c;
+  };
+  const paired = (deck.sessions || []).map((s) => ({ s, conv: convFor(s) }));
+  const restConvs = convs.filter((c) => !claimed.has(c.id));
+
   return (
     <>
       <div className="section-label">Live sessions</div>
@@ -181,13 +198,13 @@ function DeckTab({ deck, convs, onOpenSession, onOpenConv, onOpenTerm, onRefresh
         <div className="card empty"><div className="art">🌙</div><b>All quiet</b>
           No cux sessions right now.<br />Start one with <span className="mono">cux</span> on {deck.hostname}.</div>
       )}
-      {deck.sessions?.map((s) => (
+      {paired.map(({ s, conv }) => (
         <div key={s.pid} className="card tappable" style={{ borderLeft: "3px solid " + (stateColor[s.state] || "var(--dim)") }}
-          onClick={() => onOpenSession(s)}>
+          onClick={() => (conv ? onOpenConv(conv) : onOpenSession(s))}>
           <div className="row">
             <div className="grow">
-              <h3 className="ellip">{shortDir(s.cwd)}</h3>
-              <div className="sub">seat <b>{s.seat ? s.seat.split("@")[0] : "—"}</b> · up {ago(s.startedAt)}</div>
+              <h3 className="ellip">{conv?.title || shortDir(s.cwd)}</h3>
+              <div className="sub ellip">{shortDir(s.cwd)} · seat <b>{s.seat ? s.seat.split("@")[0] : "—"}</b> · up {ago(s.startedAt)}</div>
             </div>
             <span className={"badge " + s.state}>{s.state.replace("-", " ")}</span>
           </div>
@@ -202,12 +219,15 @@ function DeckTab({ deck, convs, onOpenSession, onOpenConv, onOpenTerm, onRefresh
         </div>
       ))}
 
-      <div className="section-label">Conversations</div>
-      {!convs.length && (
+      {/* whatever a live session didn't claim: history, plus any claude
+          running outside cux (desktop app tabs) whose transcript is
+          still being written — those keep their ● live dot here. */}
+      <div className="section-label">Other conversations</div>
+      {!restConvs.length && (
         <div className="card empty"><div className="art">💬</div><b>No conversations yet</b>
           Claude Code transcripts on this machine appear here.</div>
       )}
-      {convs.map((c) => (
+      {restConvs.map((c) => (
         <div key={c.id} className="card tappable" style={{ borderLeft: "3px solid " + (c.active ? "var(--ok)" : "var(--line)") }}
           onClick={() => onOpenConv(c)}>
           <div className="row"><div className="grow">
