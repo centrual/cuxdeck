@@ -153,14 +153,16 @@ party who can see your data. If a step can be removed, it will be.
 
 ## Roadmap
 
-| Phase | Scope |
-|---|---|
-| **v1** | daemon + mobile panel (sessions · seats · projects, view & manage) · QR device pairing · accountless tunnel supervisor · start-at-login · menu-bar icon |
-| **v2** | multi-machine fleet view (one phone, many decks) · Web Push events · Telegram connect wizard |
-| **v3** | usage & cost charts over time · shared team decks |
+| Phase | Scope | Status |
+|---|---|---|
+| **v1** | daemon + mobile panel (sessions · seats · projects, view & manage) · QR device pairing · accountless tunnel supervisor · start-at-login | ✅ shipped |
+| **v2** | multi-machine fleet view (one phone, many decks) · read-only live conversation view · full remote terminal · start a session remotely · Web Push events · Telegram connect wizard | ✅ shipped |
+| **v3** | per-seat utilization trend charts · shared team decks (invite with view / control) | ✅ shipped |
+| next | menu-bar tray icon · `.dmg` / Homebrew packaging · usage cost (once a price signal exists) | planned |
 
-> **Status: early development.** The experience above is the contract we're
-> building toward, not a shipped fact yet. Watch the repo — it's moving fast.
+> **Status: usable, early.** The experience above is real today — pair a phone,
+> watch and drive your fleet, from anywhere. A tray icon and packaging are what's
+> left before a 1.0 tag. Watch the repo — it's moving fast.
 
 ## Requirements
 
