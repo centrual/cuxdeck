@@ -53,25 +53,22 @@ export function Term({ pid, title, onClose }: { pid: number; title: string; onCl
   const wsRef = useRef<WebSocket | null>(null);
   const reflowRef = useRef<() => void>(() => {});
   const kbHeight = useKeyboardHeight();
-  // The bar behaves like an input accessory view: invisible until the
-  // terminal is focused, then docked above the on-screen keyboard on
-  // mobile (kbHeight > 0) or flush to the bottom edge on desktop
-  // (kbHeight === 0, no keyboard to cover it) — one signal drives both
-  // "should it show" and "how far up".
-  const [focused, setFocused] = useState(false);
-  const barVisible = focused || kbHeight > 0;
+  // The bar only earns its keep for what an on-screen keyboard can't
+  // type — a physical keyboard (desktop, or a phone with one attached)
+  // never opens visualViewport's keyboard gap, so the bar stays gone.
+  const barVisible = kbHeight > 0;
 
   // Keep the terminal sized to what's actually visible: full flex
-  // height while idle, or (visualViewport − header − bar) once the
-  // bar is showing, so the last lines never end up hidden behind the
-  // keyboard or the bar sitting above it.
+  // height while the keyboard is closed, or (visualViewport − header
+  // − bar) once it opens, so the last lines never end up hidden
+  // behind the keyboard or the bar sitting above it.
   useEffect(() => {
     if (!holder.current) return;
     if (!barVisible) {
       holder.current.style.flex = "1";
       holder.current.style.height = "";
     } else {
-      // visualViewport.height already excludes any open keyboard —
+      // visualViewport.height already excludes the open keyboard —
       // it's the truly visible area, so only the header and the bar
       // itself need to be carved out of it.
       const vh = window.visualViewport?.height ?? window.innerHeight;
@@ -80,7 +77,7 @@ export function Term({ pid, title, onClose }: { pid: number; title: string; onCl
       holder.current.style.height = Math.max(80, vh - headH - BAR_H) + "px";
     }
     reflowRef.current();
-  }, [barVisible, kbHeight]);
+  }, [barVisible]);
 
   useEffect(() => {
     const term = new Terminal({
@@ -123,22 +120,13 @@ export function Term({ pid, title, onClose }: { pid: number; title: string; onCl
     reflowRef.current = onResize;
     window.addEventListener("resize", onResize);
     document.body.classList.add("chat-open");
-
-    // The bar's visibility follows real focus, not just the initial
-    // tap-to-open — xterm keeps a hidden textarea inside holder that
-    // receives all keyboard/IME input, and focus on it bubbles here.
-    const el = holder.current!;
-    const onFocusIn = () => setFocused(true);
-    const onFocusOut = () => setFocused(false);
-    el.addEventListener("focusin", onFocusIn);
-    el.addEventListener("focusout", onFocusOut);
-    // Focus so the mobile keyboard comes up.
+    // Focus so the mobile on-screen keyboard comes up; on a physical
+    // keyboard this is a no-op as far as the bar is concerned — it
+    // only reacts to visualViewport actually shrinking.
     setTimeout(() => term.focus(), 300);
 
     return () => {
       window.removeEventListener("resize", onResize);
-      el.removeEventListener("focusin", onFocusIn);
-      el.removeEventListener("focusout", onFocusOut);
       document.body.classList.remove("chat-open");
       ws.close();
       term.dispose();
@@ -157,9 +145,10 @@ export function Term({ pid, title, onClose }: { pid: number; title: string; onCl
         <div className="grow"><h2>{title}</h2><div className="sub">live terminal — full control</div></div>
       </div>
       <div ref={holder} style={{ flex: 1, minHeight: 0, padding: "6px 4px 0 8px" }} />
-      {/* Input-accessory-style bar: invisible until the terminal is
-          focused, then docked above the on-screen keyboard on mobile
-          or flush to the bottom edge on desktop. mousedown is
+      {/* Input-accessory-style bar: invisible until an on-screen
+          keyboard actually opens (visualViewport shrinks), then
+          docked right above it. A physical keyboard never triggers
+          that shrink, so the bar never appears for it. mousedown is
           preventDefault'd so tapping a key never steals focus (and
           closes the keyboard) away from the terminal. */}
       <div className={"qkeys" + (barVisible ? " show" : "")}

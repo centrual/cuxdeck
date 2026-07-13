@@ -529,8 +529,9 @@ body.chat-open{overflow:hidden;position:fixed;inset:0;width:100%}
    behind the keyboard instead of above it. */
 .qkeys{position:fixed;left:0;right:0;bottom:0;z-index:46;display:flex;gap:6px;
   padding:7px 10px;border-top:1px solid var(--line);background:var(--bg2);
-  overflow-x:auto;flex:none;
+  overflow-x:auto;flex:none;scrollbar-width:none;
   transform:translateY(120%);transition:transform .18s ease-out}
+.qkeys::-webkit-scrollbar{display:none}
 .qkeys.show{transform:translateY(0);bottom:var(--kb-height, 0px)}
 .qkeys button{background:var(--card);border:1px solid var(--line);color:var(--fg);
   border-radius:9px;padding:7px 12px;font:600 12px ui-monospace,monospace;cursor:pointer;flex:none}
