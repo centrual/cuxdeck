@@ -5,16 +5,20 @@
 package server
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/centrual/cuxdeck/internal/auth"
 	"github.com/centrual/cuxdeck/internal/cuxcli"
 	"github.com/centrual/cuxdeck/internal/cuxdata"
+	"github.com/centrual/cuxdeck/internal/push"
 	"github.com/centrual/cuxdeck/internal/spawn"
 )
 
@@ -26,6 +30,7 @@ var webFS embed.FS
 // Server wires the pieces together.
 type Server struct {
 	Auth    *auth.Store
+	Push    *push.Store
 	Version string
 }
 
@@ -43,6 +48,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/devices", s.authed(s.devices))
 	mux.HandleFunc("POST /api/devices/revoke", s.authed(s.revoke))
 	mux.HandleFunc("POST /api/spawn", s.authed(s.spawn))
+	mux.HandleFunc("GET /api/push/key", s.authed(s.pushKey))
+	mux.HandleFunc("POST /api/push/subscribe", s.authed(s.pushSubscribe))
+	mux.HandleFunc("POST /api/push/unsubscribe", s.authed(s.pushUnsubscribe))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
 	return securityHeaders(mux)
 }
@@ -88,10 +96,12 @@ func securityHeaders(next http.Handler) http.Handler {
 // style.css + the mascot, all embedded in the binary.
 func (s *Server) panel(w http.ResponseWriter, r *http.Request) {
 	ctype := map[string]string{
-		"/":          "text/html; charset=utf-8",
-		"/app.js":    "text/javascript; charset=utf-8",
-		"/style.css": "text/css; charset=utf-8",
-		"/onion.svg": "image/svg+xml",
+		"/":                     "text/html; charset=utf-8",
+		"/app.js":               "text/javascript; charset=utf-8",
+		"/style.css":            "text/css; charset=utf-8",
+		"/onion.svg":            "image/svg+xml",
+		"/sw.js":                "text/javascript; charset=utf-8",
+		"/manifest.webmanifest": "application/manifest+json",
 	}[r.URL.Path]
 	if ctype == "" {
 		http.NotFound(w, r)
@@ -191,6 +201,47 @@ func (s *Server) spawn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]int{"pid": pid})
+}
+
+// deviceKey derives a stable per-device id from the bearer token, so a
+// push subscription can be tied to (and later cleaned up with) the
+// device that made it without storing the raw token.
+func deviceKey(r *http.Request) string {
+	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if tok == "" {
+		tok = r.URL.Query().Get("token")
+	}
+	sum := sha256.Sum256([]byte(tok))
+	return hex.EncodeToString(sum[:])
+}
+
+func (s *Server) pushKey(w http.ResponseWriter, r *http.Request) {
+	if s.Push == nil {
+		http.Error(w, `{"error":"push unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	writeJSON(w, map[string]string{"publicKey": s.Push.PublicKey()})
+}
+
+func (s *Server) pushSubscribe(w http.ResponseWriter, r *http.Request) {
+	if s.Push == nil {
+		http.Error(w, `{"error":"push unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	var sub webpush.Subscription
+	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil || sub.Endpoint == "" {
+		http.Error(w, `{"error":"bad subscription"}`, http.StatusBadRequest)
+		return
+	}
+	s.Push.Subscribe(deviceKey(r), &sub)
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+func (s *Server) pushUnsubscribe(w http.ResponseWriter, r *http.Request) {
+	if s.Push != nil {
+		s.Push.Unsubscribe(deviceKey(r))
+	}
+	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func (s *Server) devices(w http.ResponseWriter, r *http.Request) {

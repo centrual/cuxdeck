@@ -8,6 +8,7 @@ import { api, deviceName, pair, setUnauthorizedHandler } from "./api";
 import { getDecks, hasDecks, noteDeckMeta, parsePairLink, removeDeck, upsertDeck, type Deck } from "./decks";
 import { Chat } from "./chat";
 import { Term } from "./term";
+import * as push from "./push";
 import { ago, inTime, shortDir } from "./util";
 
 /* ---------- server shapes (one machine's snapshot) ---------- */
@@ -466,6 +467,8 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
 }) {
   return (
     <>
+      <div className="section-label">Notifications</div>
+      <NotifyCard fleet={fleet} toast={toast} />
       <div className="row" style={{ alignItems: "center" }}>
         <div className="section-label" style={{ flex: 1 }}>Machines in this fleet</div>
         <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onAddMachine}>＋ add</button>
@@ -489,6 +492,45 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
           separate deck with its own tunnel and token. Add another with its pairing link; forget it to drop it.</div>
       </div>
     </>
+  );
+}
+
+// NotifyCard enrols this browser for push on every reachable machine
+// at once — one tap covers the fleet, since each deck pushes through
+// its own tunnel to this browser's push service.
+function NotifyCard({ fleet, toast }: { fleet: Entry[]; toast: (m: string, ms?: number) => void }) {
+  const [on, setOn] = useState<boolean | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { push.isEnabled().then(setOn); }, []);
+  const supported = push.pushSupported();
+
+  const toggle = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const online = fleet.filter((e) => e.online);
+      if (on) {
+        for (const e of online) await push.disable(e.deck);
+        setOn(false); toast("Notifications off");
+      } else {
+        if (!online.length) { toast("No reachable machine to enable"); return; }
+        let ok = 0;
+        for (const e of online) { try { if (await push.enable(e.deck)) ok++; } catch (err) { toast((err as Error).message, 3600); } }
+        if (ok) { setOn(true); toast("Notifications on for " + ok + " machine" + (ok === 1 ? "" : "s")); }
+      }
+    } finally { setBusy(false); }
+  };
+
+  if (!supported) return (
+    <div className="card"><div className="sub">This browser can't do Web Push. Add cuxdeck to your home screen (iOS 16.4+) or use a modern browser to get alerts.</div></div>
+  );
+  return (
+    <div className="card"><div className="row">
+      <div className="grow"><h3>Push alerts</h3>
+        <div className="sub">Seats exhausted, retries, finished runs, a moved tunnel — pushed to this device.</div></div>
+      <button className={"btn small" + (on ? " danger" : "")} disabled={busy} onClick={toggle}>
+        {busy ? "…" : on ? "Turn off" : "Enable"}</button>
+    </div></div>
   );
 }
 

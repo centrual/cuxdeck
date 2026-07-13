@@ -18,10 +18,13 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/centrual/cuxdeck/internal/auth"
+	"github.com/centrual/cuxdeck/internal/push"
 	"github.com/centrual/cuxdeck/internal/server"
 	"github.com/centrual/cuxdeck/internal/tunnel"
+	"github.com/centrual/cuxdeck/internal/watch"
 	qrcode "github.com/skip2/go-qrcode"
 )
 
@@ -74,7 +77,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	srv := &server.Server{Auth: st, Version: version}
+	// Web Push: a VAPID keypair + local subscription store, and a
+	// watcher that turns cux state changes into notifications. Both are
+	// best-effort — if push can't initialise, the panel still runs.
+	pushStore, perr := push.Open(home())
+	if perr != nil {
+		fmt.Fprintln(os.Stderr, "cuxdeck: push disabled:", perr)
+	} else {
+		go watch.Run(pushStore, 5*time.Second)
+	}
+
+	srv := &server.Server{Auth: st, Push: pushStore, Version: version}
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", *port))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cuxdeck:", err)
@@ -105,8 +118,15 @@ func main() {
 		},
 		OnURL: func(u string) {
 			fmt.Printf("\ncuxdeck: tunnel up — %s\n", u)
+			prev, _ := os.ReadFile(filepath.Join(home(), "current-url"))
 			_ = os.WriteFile(filepath.Join(home(), "current-url"), []byte(u), 0o600)
 			showPairing(st, u)
+			// A rotated tunnel address is exactly the "panel moved — tap
+			// to reopen" case Web Push exists for: the old service worker
+			// still receives it even though its origin just changed.
+			if pushStore != nil && len(prev) > 0 && string(prev) != u {
+				pushStore.Notify(push.Event{Title: "cuxdeck moved", Body: "New address — tap to reopen the panel", Tag: "tunnel-url"})
+			}
 		},
 	}
 	if err := tm.EnsureBinary(ctx); err != nil {
