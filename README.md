@@ -79,12 +79,13 @@ already in your hand.
 
 ## What it feels like to use
 
-1. **Install** cuxdeck on each machine (dmg · Homebrew · one-line installer).
-2. **Open it once.** An icon lands in your menu bar; it starts with the
-   computer from then on. Nothing to configure.
-3. **Tap “Pair a phone.”** A QR code fills the screen.
-4. **Scan it.** That machine is now on your phone — live sessions, seat usage,
-   projects. Scan the next machine's QR and it joins the same fleet view.
+1. **Install** cuxdeck on each machine (`go build`, and soon dmg / Homebrew).
+2. **Run `cuxdeck install`.** It starts with the computer from then on, prints
+   a pairing QR, and needs no configuration. (A menu-bar tray icon is next.)
+3. **Scan the QR.** That machine is now on your phone — live sessions, seat
+   usage, projects, and its terminals. Scan the next machine's QR and it joins
+   the same fleet view.
+4. **Share it.** Invite a teammate with a tap — view-only, or full control.
 
 No sign-ups. No tokens to copy by hand. No VPN client on the phone. No third
 party who can see your data. If a step can be removed, it will be.
