@@ -20,12 +20,14 @@ import (
 	"regexp"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/centrual/cuxdeck/internal/auth"
 	"github.com/centrual/cuxdeck/internal/notify"
 	"github.com/centrual/cuxdeck/internal/push"
+	"github.com/centrual/cuxdeck/internal/selfupdate"
 	"github.com/centrual/cuxdeck/internal/server"
 	"github.com/centrual/cuxdeck/internal/telegram"
 	"github.com/centrual/cuxdeck/internal/tray"
@@ -167,6 +169,48 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 		}
 		return ""
 	}
+
+	// Software update. Mode lives in ~/.cuxdeck/autoupdate (off|notify|
+	// auto), defaulting to notify. The checker below keeps latestVer
+	// fresh; the server reads it and can trigger runUpdate.
+	updateMode := func() string {
+		b, _ := os.ReadFile(filepath.Join(home(), "autoupdate"))
+		if m := strings.TrimSpace(string(b)); m == "off" || m == "auto" {
+			return m
+		}
+		return "notify"
+	}
+	setUpdateMode := func(m string) error {
+		if m != "off" && m != "notify" && m != "auto" {
+			return fmt.Errorf("invalid mode %q", m)
+		}
+		return os.WriteFile(filepath.Join(home(), "autoupdate"), []byte(m), 0o600)
+	}
+	var latestMu sync.Mutex
+	var latestVer string
+	getLatest := func() string {
+		latestMu.Lock()
+		defer latestMu.Unlock()
+		return latestVer
+	}
+	// runUpdate upgrades in place (Homebrew only) and lets launchd's
+	// KeepAlive relaunch the new binary. It returns immediately; the
+	// upgrade runs in the background so the HTTP caller isn't held open.
+	runUpdate := func() error {
+		if !selfupdate.BrewManaged() {
+			return fmt.Errorf("not a Homebrew install — download the latest release from GitHub")
+		}
+		go func() {
+			if err := selfupdate.Upgrade(context.Background()); err != nil {
+				fmt.Fprintln(os.Stderr, "cuxdeck: update failed:", err)
+				return
+			}
+			fmt.Println("cuxdeck: updated — restarting")
+			os.Exit(0)
+		}()
+		return nil
+	}
+
 	srv := &server.Server{Auth: st, Push: pushStore, TG: tgStore, Usage: usageStore, Version: version,
 		StartAtLoginState: serviceInstalled,
 		SetStartAtLogin: func(on bool) error {
@@ -186,7 +230,54 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 			}
 			return os.WriteFile(filepath.Join(home(), "name"), []byte(n), 0o600)
 		},
+		LatestVersion: getLatest,
+		UpdateMode:    updateMode,
+		SetUpdateMode: setUpdateMode,
+		RunUpdate:     runUpdate,
 	}
+
+	// Update checker: shortly after boot, then every 6 hours. It records
+	// the newest release, notifies once per new version (Web Push +
+	// Telegram), and — in auto mode on a Homebrew install — upgrades.
+	go func() {
+		var notified string
+		check := func() {
+			if updateMode() == "off" {
+				return
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			v, err := selfupdate.Latest(ctx)
+			if err != nil || v == "" {
+				return
+			}
+			latestMu.Lock()
+			latestVer = v
+			latestMu.Unlock()
+			if !selfupdate.Newer(version, v) {
+				return
+			}
+			if updateMode() == "auto" && selfupdate.BrewManaged() {
+				_ = runUpdate()
+				return
+			}
+			if notified != v {
+				notified = v
+				ev := notify.Event{Title: "cuxdeck update available", Body: "v" + v + " — open cuxdeck to install", Tag: "update"}
+				if pushStore != nil {
+					pushStore.Notify(ev)
+				}
+				tgStore.Notify(ev)
+			}
+		}
+		time.Sleep(30 * time.Second)
+		check()
+		t := time.NewTicker(6 * time.Hour)
+		defer t.Stop()
+		for range t.C {
+			check()
+		}
+	}()
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "cuxdeck:", err)

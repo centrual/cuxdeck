@@ -422,11 +422,24 @@ func isSystemWrapper(s string) bool {
 	if strings.HasPrefix(t, "<") { // <system-reminder>, <local-command…>, <bash-input>…
 		return true
 	}
-	if strings.HasPrefix(t, "Caveat:") || strings.HasPrefix(t, "[Request interrupted") {
-		return true
+	// Machine-injected "user" turns that don't start with a tag: the
+	// background-task notifications (which begin with a plain-text
+	// "[SYSTEM NOTIFICATION …]" banner before the <task-notification>
+	// block), interrupts, caveats, and loaded skill bodies. Left in, they
+	// render as raw XML in the conversation.
+	for _, p := range []string{
+		"[SYSTEM NOTIFICATION",
+		"[Request interrupted",
+		"Caveat:",
+		"Base directory for this skill:",
+	} {
+		if strings.HasPrefix(t, p) {
+			return true
+		}
 	}
-	// Skill/plugin bodies are injected as "user" turns when loaded.
-	if strings.HasPrefix(t, "Base directory for this skill:") {
+	// A task-notification can also arrive without the banner; catch the
+	// block wherever it leads the turn.
+	if strings.Contains(t, "<task-notification>") && !strings.Contains(t, midTurnMarker) {
 		return true
 	}
 	return false

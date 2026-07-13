@@ -22,10 +22,24 @@ func TestSystemWrappersHidden(t *testing.T) {
 		`{"type":"user","message":{"role":"user","content":"Caveat: local command output"}}`,
 		`{"type":"user","message":{"role":"user","content":"<bash-input>ls</bash-input>"}}`,
 		`{"type":"user","message":{"role":"user","content":"   "}}`,
+		// Background-task notifications: a plain-text banner precedes the
+		// <task-notification> block, so they don't start with "<".
+		`{"type":"user","message":{"role":"user","content":"[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.\n<task-notification>\n<task-id>abc123</task-id>\n<status>completed</status>\n<summary>Background command \"deploy\" completed (exit code 0)</summary>\n</task-notification>"}}`,
+		`{"type":"user","message":{"role":"user","content":"<task-notification><task-id>x</task-id></task-notification>"}}`,
 	} {
 		if evs := Parse([]byte(c)); len(evs) != 0 {
 			t.Errorf("wrapper should be hidden, got %+v for %s", evs, c)
 		}
+	}
+}
+
+// A real user message that merely arrives mid-turn must still show, even
+// though the surrounding notification machinery is stripped.
+func TestMidTurnUserMessageStillShows(t *testing.T) {
+	c := `{"type":"user","message":{"role":"user","content":"The user sent a new message while you were working:\nplease also add tests\n\nThis is how Claude Code surfaces messages..."}}`
+	e := first(Parse([]byte(c)))
+	if e.Role != "user" || e.Kind != "text" || e.Text != "please also add tests" {
+		t.Errorf("mid-turn user message should show, got %+v", e)
 	}
 }
 

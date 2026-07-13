@@ -20,6 +20,7 @@ import (
 	"github.com/centrual/cuxdeck/internal/cuxcli"
 	"github.com/centrual/cuxdeck/internal/cuxdata"
 	"github.com/centrual/cuxdeck/internal/push"
+	"github.com/centrual/cuxdeck/internal/selfupdate"
 	"github.com/centrual/cuxdeck/internal/spawn"
 	"github.com/centrual/cuxdeck/internal/telegram"
 	"github.com/centrual/cuxdeck/internal/usagelog"
@@ -63,6 +64,14 @@ type Server struct {
 	// machine, overriding the OS hostname in the deck view.
 	Name    func() string
 	SetName func(string) error
+	// Software update, injected from main (which owns the check loop and
+	// the restart). LatestVersion is the last release seen by the checker
+	// ("" if unknown), UpdateMode is off|notify|auto, and RunUpdate kicks
+	// off an in-place upgrade + restart. Nil when updates aren't wired.
+	LatestVersion func() string
+	UpdateMode    func() string
+	SetUpdateMode func(string) error
+	RunUpdate     func() error
 }
 
 // Handler returns the full route table.
@@ -93,6 +102,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/name", s.controlled(s.setName))
 	mux.HandleFunc("GET /api/service", s.authed(s.serviceGet))
 	mux.HandleFunc("POST /api/service", s.controlled(s.serviceSet))
+	mux.HandleFunc("GET /api/update", s.authed(s.updateGet))
+	mux.HandleFunc("POST /api/update", s.controlled(s.updateSet))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
 	mux.HandleFunc("GET /local/qr.png", s.localOnly(s.pairingQR))
 	mux.HandleFunc("GET /local/pair-info", s.localOnly(s.pairInfo))
@@ -398,6 +409,66 @@ func (s *Server) tgDisconnect(w http.ResponseWriter, r *http.Request) {
 		s.TG.Disconnect()
 	}
 	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// updateGet reports the current version, the newest release seen by the
+// checker, whether an upgrade is available, the chosen mode, and how an
+// update would install on this machine (homebrew vs manual).
+func (s *Server) updateGet(w http.ResponseWriter, r *http.Request) {
+	latest := ""
+	if s.LatestVersion != nil {
+		latest = s.LatestVersion()
+	}
+	mode := "off"
+	if s.UpdateMode != nil {
+		mode = s.UpdateMode()
+	}
+	writeJSON(w, map[string]any{
+		"current":   s.Version,
+		"latest":    latest,
+		"available": latest != "" && selfupdate.Newer(s.Version, latest),
+		"mode":      mode,
+		"method":    selfupdate.Method(),
+	})
+}
+
+// updateSet either changes the update mode ({"mode":"off|notify|auto"})
+// or triggers an install now ({"action":"install"}). Install returns
+// immediately; the upgrade runs in the background and the daemon restarts
+// itself when it's done.
+func (s *Server) updateSet(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Mode   string `json:"mode"`
+		Action string `json:"action"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	switch {
+	case in.Action == "install":
+		if s.RunUpdate == nil {
+			http.Error(w, `{"error":"updates not available here"}`, http.StatusServiceUnavailable)
+			return
+		}
+		if err := s.RunUpdate(); err != nil {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]string{"status": "updating"})
+	case in.Mode != "":
+		if s.SetUpdateMode == nil {
+			http.Error(w, `{"error":"not supported here"}`, http.StatusServiceUnavailable)
+			return
+		}
+		if err := s.SetUpdateMode(in.Mode); err != nil {
+			http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, map[string]string{"mode": in.Mode})
+	default:
+		http.Error(w, `{"error":"nothing to do"}`, http.StatusBadRequest)
+	}
 }
 
 func (s *Server) serviceGet(w http.ResponseWriter, r *http.Request) {

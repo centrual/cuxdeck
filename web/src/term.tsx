@@ -116,6 +116,39 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
 
     term.onData((s: string) => { if (ws.readyState === WebSocket.OPEN) ws.send(frame(FRAME_INPUT, enc.encode(s))); });
 
+    // Mobile touch scrolling: xterm doesn't turn a finger swipe into
+    // scrolling on its own. Translate a vertical swipe into scrollback in
+    // the normal buffer, or into mouse-wheel escapes in the alternate
+    // buffer (a full-screen TUI like Claude Code, which scrolls on wheel).
+    const el = holder.current!;
+    let lastY = 0, accum = 0;
+    const cellH = () => {
+      const h = (term as unknown as { _core?: { _renderService?: { dimensions?: { css?: { cell?: { height?: number } } } } } })
+        ._core?._renderService?.dimensions?.css?.cell?.height;
+      return h && h > 4 ? h : 17;
+    };
+    const onTouchStart = (e: TouchEvent) => { lastY = e.touches[0].clientY; accum = 0; };
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0].clientY;
+      accum += lastY - y;
+      lastY = y;
+      const lines = Math.trunc(accum / cellH());
+      if (lines === 0) return;
+      accum -= lines * cellH();
+      if (term.buffer.active.type === "alternate") {
+        // SGR wheel: button 64 = up, 65 = down. Cap the burst so a fast
+        // flick can't fire a hundred escapes at once.
+        const btn = lines > 0 ? 65 : 64;
+        const seq = `\x1b[<${btn};1;1M`.repeat(Math.min(Math.abs(lines), 6));
+        if (ws.readyState === WebSocket.OPEN) ws.send(frame(FRAME_INPUT, enc.encode(seq)));
+      } else {
+        term.scrollLines(lines);
+      }
+      e.preventDefault();
+    };
+    el.addEventListener("touchstart", onTouchStart, { passive: true });
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+
     const onResize = () => { fit.fit(); sendResize(); };
     reflowRef.current = onResize;
     window.addEventListener("resize", onResize);
@@ -127,6 +160,8 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
 
     return () => {
       window.removeEventListener("resize", onResize);
+      el.removeEventListener("touchstart", onTouchStart);
+      el.removeEventListener("touchmove", onTouchMove);
       document.body.classList.remove("chat-open");
       ws.close();
       term.dispose();
@@ -144,7 +179,7 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
         <button className="back" onClick={onClose}>‹</button>
         <div className="grow"><h2>{title}</h2><div className="sub">live terminal — full control</div></div>
       </div>
-      <div ref={holder} style={{ flex: 1, minHeight: 0, padding: "6px 4px 0 8px" }} />
+      <div ref={holder} style={{ flex: 1, minHeight: 0, padding: "6px 4px 0 8px", touchAction: "none" }} />
       {/* Input-accessory-style bar: invisible until an on-screen
           keyboard actually opens (visualViewport shrinks), then
           docked right above it. A physical keyboard never triggers

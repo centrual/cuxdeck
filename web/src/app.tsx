@@ -527,6 +527,10 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
       {fleet.filter((e) => e.online && canControl(e)).map((e) => (
         <StartupCard key={e.deck.id} e={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} />
       ))}
+      <div className="section-label">Software update</div>
+      {fleet.filter((e) => e.online && canControl(e)).map((e) => (
+        <UpdateCard key={e.deck.id} e={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} />
+      ))}
       <div className="section-label">Notifications</div>
       <NotifyCard fleet={fleet} toast={toast} />
       <TelegramCard fleet={fleet} toast={toast} setSheet={setSheet} />
@@ -594,6 +598,66 @@ function StartupCard({ e, label, toast }: { e: Entry; label: string; toast: (m: 
       <button className={"btn small" + (state?.enabled ? " danger" : "")} disabled={busy || !state} onClick={toggle}>
         {busy ? "…" : state?.enabled ? "Turn off" : "Enable"}</button>
     </div></div>
+  );
+}
+
+// UpdateCard shows the installed vs latest version, lets you pick how
+// updates behave (off / notify / auto), and — on a Homebrew install —
+// offers a one-tap "Update now" when a newer release is out.
+type UpdateInfo = { current: string; latest: string; available: boolean; mode: string; method: string };
+function UpdateCard({ e, label, toast }: { e: Entry; label: string; toast: (m: string, ms?: number) => void }) {
+  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useCallback(() => {
+    api<UpdateInfo>(e.deck, "/api/update").then(setInfo).catch(() => {});
+  }, [e.deck]);
+  useEffect(load, [load]);
+  const setMode = async (mode: string) => {
+    if (!info || info.mode === mode) return;
+    setInfo({ ...info, mode });
+    try {
+      await api(e.deck, "/api/update", { method: "POST", body: JSON.stringify({ mode }) });
+      toast(mode === "auto" ? "Updates install automatically" : mode === "notify" ? "You'll be told when an update is out" : "Update checks off");
+    } catch (err) { toast("Failed: " + (err as Error).message, 3600); load(); }
+  };
+  const install = async () => {
+    setBusy(true);
+    try {
+      await api(e.deck, "/api/update", { method: "POST", body: JSON.stringify({ action: "install" }) });
+      toast("Updating… the deck will restart in a moment", 5000);
+    } catch (err) { toast("Failed: " + (err as Error).message, 3600); }
+    finally { setBusy(false); }
+  };
+  if (!info) return null;
+  const modes: Array<[string, string]> = [["off", "Off"], ["notify", "Notify"], ["auto", "Auto"]];
+  return (
+    <div className="card">
+      <div className="row">
+        <div className="grow">
+          <h3>cuxdeck {info.current}{label ? " · " + label : ""}</h3>
+          <div className="sub">
+            {info.available
+              ? "● v" + info.latest + " available"
+              : info.latest && info.latest !== info.current
+                ? "up to date (latest v" + info.latest + ")"
+                : "up to date"}
+          </div>
+        </div>
+        {info.available && (info.method === "homebrew"
+          ? <button className="btn small" disabled={busy} onClick={install}>{busy ? "…" : "Update now"}</button>
+          : <a className="btn small" style={{ textDecoration: "none" }} href="https://github.com/centrual/cuxdeck/releases/latest" target="_blank" rel="noopener">Download</a>)}
+      </div>
+      <div className="seg" style={{ marginTop: 10 }}>
+        {modes.map(([m, lbl]) => (
+          <button key={m} className={"segbtn" + (info.mode === m ? " on" : "")} onClick={() => setMode(m)}>{lbl}</button>
+        ))}
+      </div>
+      <div className="sub" style={{ marginTop: 6 }}>
+        {info.mode === "auto"
+          ? (info.method === "homebrew" ? "Installs new releases automatically, then restarts." : "Auto-install needs a Homebrew install; you'll be notified instead.")
+          : info.mode === "notify" ? "Checks for new releases and tells you — you install." : "No update checks."}
+      </div>
+    </div>
   );
 }
 
