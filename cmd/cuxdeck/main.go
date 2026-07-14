@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/centrual/cuxdeck/internal/auth"
+	"github.com/centrual/cuxdeck/internal/i18n"
 	"github.com/centrual/cuxdeck/internal/notify"
 	"github.com/centrual/cuxdeck/internal/push"
 	"github.com/centrual/cuxdeck/internal/selfupdate"
@@ -161,7 +162,15 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 		notifiers = append(notifiers, pushStore)
 	}
 	notifiers = append(notifiers, tgStore)
-	go watch.Run(notifiers, 5*time.Second)
+
+	// The notification language, chosen in the panel and stored in
+	// ~/.cuxdeck/lang. Empty = English. Read fresh each time so a change
+	// takes effect without a restart.
+	langOf := func() string {
+		b, _ := os.ReadFile(filepath.Join(home(), "lang"))
+		return strings.TrimSpace(string(b))
+	}
+	go watch.Run(notifiers, 5*time.Second, langOf)
 
 	curURL := func() string {
 		if b, err := os.ReadFile(filepath.Join(home(), "current-url")); err == nil && len(b) > 0 {
@@ -234,6 +243,19 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 		UpdateMode:    updateMode,
 		SetUpdateMode: setUpdateMode,
 		RunUpdate:     runUpdate,
+		Lang:          langOf,
+		SetLang: func(l string) error {
+			switch l {
+			case "", "en":
+				if err := os.Remove(filepath.Join(home(), "lang")); err != nil && !os.IsNotExist(err) {
+					return err
+				}
+				return nil
+			case "tr", "fr", "de", "it":
+				return os.WriteFile(filepath.Join(home(), "lang"), []byte(l), 0o600)
+			}
+			return fmt.Errorf("unsupported language %q", l)
+		},
 	}
 
 	// Update checker: shortly after boot, then every 6 hours. It records
@@ -263,7 +285,8 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 			}
 			if notified != v {
 				notified = v
-				ev := notify.Event{Title: "cuxdeck update available", Body: "v" + v + " — open cuxdeck to install", Tag: "update"}
+				lg := langOf()
+				ev := notify.Event{Title: i18n.T(lg, "cuxdeck update available"), Body: "v" + v + i18n.T(lg, " — open cuxdeck to install"), Tag: "update"}
 				if pushStore != nil {
 					pushStore.Notify(ev)
 				}
@@ -319,7 +342,7 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 			// the old (now-dead) origin. The message carries the URL
 			// itself, so it's a tap away wherever it lands.
 			if len(prev) > 0 && string(prev) != u {
-				ev := notify.Event{Title: "cuxdeck moved — new address", Body: u, Tag: "tunnel-url"}
+				ev := notify.Event{Title: i18n.T(langOf(), "cuxdeck moved — new address"), Body: u, Tag: "tunnel-url"}
 				if pushStore != nil {
 					pushStore.Notify(ev)
 				}

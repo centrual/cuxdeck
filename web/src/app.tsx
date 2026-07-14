@@ -10,6 +10,7 @@ import { Chat } from "./chat";
 import { Term } from "./term";
 import * as push from "./push";
 import { ago, inTime, shortDir } from "./util";
+import { t, useLang, setLang, LANGS } from "./i18n";
 
 /* ---------- server shapes (one machine's snapshot) ---------- */
 type Session = { pid: number; cwd: string; sessionId?: string; seat?: string; state: string; detail?: string; startedAt: string; attachable?: boolean };
@@ -85,6 +86,7 @@ export default function App() {
   const [toastMsg, setToastMsg] = useState("");
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
   useNow();
+  const lang = useLang();
 
   const toast = useCallback((m: string, ms = 2400) => {
     setToastMsg(m);
@@ -120,39 +122,49 @@ export default function App() {
     return () => clearInterval(t);
   }, [refresh, decks.length]);
 
+  // Mirror the panel's language to every machine so its push / Telegram
+  // notifications go out in the same language. Runs on language change
+  // and when the deck list changes (a new machine learns it too);
+  // best-effort — a view-only or offline deck just 403s / fails quietly.
+  useEffect(() => {
+    getDecks().forEach((d) => {
+      api(d, "/api/lang", { method: "POST", body: JSON.stringify({ lang }) }).catch(() => {});
+    });
+  }, [lang, decks.length]);
+
   const act = useCallback(async (deck: Deck, action: string, args: Record<string, string>, note: string) => {
     toast(note);
-    try { await api(deck, "/api/action", { method: "POST", body: JSON.stringify({ action, args }) }); toast("Done ✓"); refresh(); }
-    catch (e) { toast("Failed: " + (e as Error).message, 3600); }
+    try { await api(deck, "/api/action", { method: "POST", body: JSON.stringify({ action, args }) }); toast(t("Done ✓")); refresh(); }
+    catch (e) { toast(t("Failed: ") + (e as Error).message, 3600); }
   }, [refresh, toast]);
 
   // Launch a brand-new cux session on a machine, then jump straight
   // into its terminal — start work from the phone, not just watch it.
   const spawnSession = useCallback(async (deck: Deck, dir: string) => {
     setSheet(null);
-    toast("Starting cux in " + shortDir(dir) + "…");
+    toast(t("Starting cux in ") + shortDir(dir) + "…");
     try {
       const { pid } = await api<{ pid: number }>(deck, "/api/spawn", { method: "POST", body: JSON.stringify({ dir }) });
       // Give cux a moment to open its attach socket before we connect.
       setTimeout(() => setTermSess({ deck, pid, title: shortDir(dir) }), 700);
       refresh();
-    } catch (e) { toast("Failed: " + (e as Error).message, 3600); }
+    } catch (e) { toast(t("Failed: ") + (e as Error).message, 3600); }
   }, [refresh, toast]);
 
   const addMachine = useCallback(async (link: string) => {
     const parsed = parsePairLink(link);
-    if (!parsed) { toast("That doesn't look like a cuxdeck link"); return; }
+    if (!parsed) { toast(t("That doesn't look like a cuxdeck link")); return; }
     try {
       const token = await pair(parsed.url, parsed.code, deviceName());
       upsertDeck({ id: parsed.url || "self", url: parsed.url, token });
       setDecks(getDecks());
       setSheet(null);
-      toast("Machine added ⌁");
+      toast(t("Machine added ⌁"));
       refresh();
-    } catch { toast("Pairing failed — the code may have expired"); }
+    } catch { toast(t("Pairing failed — the code may have expired")); }
   }, [refresh, toast]);
 
-  if (!hasDecks()) return <Pair onPaired={() => { setDecks(getDecks()); toast("Paired — welcome aboard ⌁"); }} />;
+  if (!hasDecks()) return <Pair onPaired={() => { setDecks(getDecks()); toast(t("Paired — welcome aboard ⌁")); }} />;
 
   const openChat = (deck: Deck, path: string, title: string, sub: string) => setChat({ deck, path, title, sub });
   const anyOnline = fleet.some((e) => e.online);
@@ -165,7 +177,7 @@ export default function App() {
           <div className="logo"><Mascot size={24} /></div>
           <h1 className="mono">cuxdeck<span className="cur">_</span></h1>
           <div className="host"><span className={"pulse" + (anyOnline ? "" : " off")}></span>
-            <span>{multi ? fleet.length + " machines" : machineName(fleet[0] || { deck: decks[0] } as Entry)}</span></div>
+            <span>{multi ? fleet.length + " " + t("machines") : machineName(fleet[0] || { deck: decks[0] } as Entry)}</span></div>
         </div>
       </header>
 
@@ -174,37 +186,37 @@ export default function App() {
 
         {tab === "deck" && fleet.map((e) => (
           <MachineBlock key={e.deck.id} e={e} showHeader={multi} control={canControl(e)}
-            onOpenSession={(s) => openChat(e.deck, "/api/session/" + s.pid + "/chat", shortDir(s.cwd), "seat " + (s.seat ? s.seat.split("@")[0] : "—"))}
+            onOpenSession={(s) => openChat(e.deck, "/api/session/" + s.pid + "/chat", shortDir(s.cwd), t("seat ") + (s.seat ? s.seat.split("@")[0] : "—"))}
             onOpenConv={(c) => openChat(e.deck, "/api/conversation/" + c.id + "/chat", shortDir(c.cwd || "?"), "")}
             onOpenTerm={(s) => setTermSess({ deck: e.deck, pid: s.pid, title: shortDir(s.cwd) })}
             onNewSession={() => setSheet(<SpawnSheet e={e} onStart={(dir) => spawnSession(e.deck, dir)} />)}
-            onRefreshUsage={() => act(e.deck, "usage-refresh", {}, "Refreshing usage…")} />
+            onRefreshUsage={() => act(e.deck, "usage-refresh", {}, t("Refreshing usage…"))} />
         ))}
 
         {tab === "seats" && fleet.map((e) => (
           <SeatsBlock key={e.deck.id} e={e} showHeader={multi} control={canControl(e)}
             onSwitch={(a) => setSheet(<ConfirmSwitch label={seatLabel(a)} onCancel={() => setSheet(null)}
-              onGo={() => { setSheet(null); act(e.deck, "switch", { target: String(a.slot) }, "Switching seat…"); }} />)} />
+              onGo={() => { setSheet(null); act(e.deck, "switch", { target: String(a.slot) }, t("Switching seat…")); }} />)} />
         ))}
 
         {tab === "projects" && fleet.map((e) => (
           <ProjectsBlock key={e.deck.id} e={e} showHeader={multi} control={canControl(e)}
             onCreate={() => setSheet(<ProjectSheet host={machineName(e)} toast={toast}
-              create={(name, dir) => { setSheet(null); act(e.deck, "project-create", { name, dir }, "Creating " + name + "…"); }} />)}
+              create={(name, dir) => { setSheet(null); act(e.deck, "project-create", { name, dir }, t("Creating ") + name + "…"); }} />)}
             onSeats={(p) => e.snap && setSheet(<SeatSheet project={p} snap={e.snap} deck={e.deck} toast={toast} refresh={refresh} act={act} close={() => setSheet(null)} />)} />
         ))}
 
         {tab === "settings" && (
           <SettingsTab fleet={fleet} toast={toast} setSheet={setSheet}
             onAddMachine={() => setSheet(<AddMachineSheet add={addMachine} />)}
-            onForget={(d) => { removeDeck(d.id); setDecks(getDecks()); toast("Machine forgotten"); }} />
+            onForget={(d) => { removeDeck(d.id); setDecks(getDecks()); toast(t("Machine forgotten")); }} />
         )}
       </main>
 
       <nav>
-        {(["deck", "seats", "projects", "settings"] as const).map((t) => (
-          <button key={t} className={tab === t ? "on" : ""} onClick={() => { setTab(t); window.scrollTo({ top: 0 }); }}>
-            <NavIcon name={t} />{t[0].toUpperCase() + t.slice(1)}
+        {(["deck", "seats", "projects", "settings"] as const).map((tb) => (
+          <button key={tb} className={tab === tb ? "on" : ""} onClick={() => { setTab(tb); window.scrollTo({ top: 0 }); }}>
+            <NavIcon name={tb} />{t(tb[0].toUpperCase() + tb.slice(1))}
           </button>
         ))}
       </nav>
@@ -235,7 +247,7 @@ function MachineHeader({ e }: { e: Entry }) {
     <div className="mhead">
       <span className={"mdot" + (e.online ? "" : " off")} />
       <span className="mname">{machineName(e)}</span>
-      {!e.online && <span className="moff">unreachable</span>}
+      {!e.online && <span className="moff">{t("unreachable")}</span>}
       {e.snap && <span className="msub">{e.snap.os}</span>}
     </div>
   );
@@ -292,9 +304,9 @@ function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
       <div className="row">
         <div className="grow"><h3 className="ellip">{shortDir(g.dir)}</h3>
           <div className="sub">{live
-            ? <><b style={{ color: "var(--ok)" }}>● {live} running</b>{live > 1 ? " · " + live + " seats" : ""}</>
-            : liveHistory.length ? <b style={{ color: "var(--ok)" }}>● live (outside cux)</b>
-              : <>{g.history.length} conversation{g.history.length === 1 ? "" : "s"} · {ago(new Date(g.lastAt).toISOString())} ago</>}
+            ? <><b style={{ color: "var(--ok)" }}>● {live} {t("running")}</b>{live > 1 ? " · " + live + " " + t("seats") : ""}</>
+            : liveHistory.length ? <b style={{ color: "var(--ok)" }}>{t("● live (outside cux)")}</b>
+              : <>{g.history.length} conversation{g.history.length === 1 ? "" : "s"} · {ago(new Date(g.lastAt).toISOString())} {t("ago")}</>}
           </div>
         </div>
       </div>
@@ -303,8 +315,8 @@ function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
         <div key={s.pid} className="srow tappable" onClick={() => (conv ? onOpenConv(conv) : onOpenSession(s))}>
           <span className="dot" style={{ color: stateColor[s.state] || "var(--dim)" }}>▎</span>
           <div className="grow" style={{ minWidth: 0 }}>
-            <div className="ellip" style={{ fontWeight: 600 }}>{conv?.title || "(starting…)"}</div>
-            <div className="sub">seat <b>{s.seat ? s.seat.split("@")[0] : "—"}</b> · up {ago(s.startedAt)}
+            <div className="ellip" style={{ fontWeight: 600 }}>{conv?.title || t("(starting…)")}</div>
+            <div className="sub">{t("seat ")}<b>{s.seat ? s.seat.split("@")[0] : "—"}</b> · {t("up")} {ago(s.startedAt)}
               {s.detail ? " · ↻ " + s.detail : ""}</div>
           </div>
           {s.attachable && control && (
@@ -318,8 +330,8 @@ function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
         <div key={c.id} className="srow tappable" onClick={() => onOpenConv(c)}>
           <span className="dot" style={{ color: "var(--ok)" }}>▎</span>
           <div className="grow" style={{ minWidth: 0 }}>
-            <div className="ellip" style={{ fontWeight: 600 }}>{c.title || "(no messages yet)"}</div>
-            <div className="sub">not managed by cux · ● live</div>
+            <div className="ellip" style={{ fontWeight: 600 }}>{c.title || t("(no messages yet)")}</div>
+            <div className="sub">{t("not managed by cux · ● live")}</div>
           </div>
         </div>
       ))}
@@ -327,17 +339,17 @@ function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
       {past.length > 0 && (
         <>
           <div className="morebar" onClick={() => setOpen(!open)}>
-            {open ? "▾ hide"
+            {open ? t("▾ hide")
               : (live || liveHistory.length)
                 ? "▸ " + past.length + " past conversation" + (past.length === 1 ? "" : "s")
-                : "▸ show conversations"}
+                : t("▸ show conversations")}
           </div>
           {open && past.map((c) => (
             <div key={c.id} className="srow tappable" onClick={() => onOpenConv(c)}>
               <span className="dot" style={{ color: "var(--faint)" }}>▎</span>
               <div className="grow" style={{ minWidth: 0 }}>
-                <div className="ellip">{c.title || "(no messages yet)"}</div>
-                <div className="sub">{ago(c.updatedAt)} ago</div>
+                <div className="ellip">{c.title || t("(no messages yet)")}</div>
+                <div className="sub">{ago(c.updatedAt)} {t("ago")}</div>
               </div>
             </div>
           ))}
@@ -359,21 +371,21 @@ function MachineBlock({ e, showHeader, control, onOpenSession, onOpenConv, onOpe
   return (
     <>
       <div className="row" style={{ alignItems: "center" }}>
-        {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>Projects</div>}
-        {e.online && control && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onNewSession}>＋ new session</button>}
+        {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>{t("Projects")}</div>}
+        {e.online && control && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onNewSession}>{t("＋ new session")}</button>}
       </div>
-      {!e.online && <div className="card empty"><div className="art">📡</div><b>Unreachable</b>
-        This machine's tunnel is down or it's offline.</div>}
+      {!e.online && <div className="card empty"><div className="art">📡</div><b>{t("Unreachable")}</b>
+        {t("This machine's tunnel is down or it's offline.")}</div>}
       {e.online && !groups.length && (
-        <div className="card empty"><div className="art">🌙</div><b>All quiet</b>
-          No sessions or conversations yet.</div>
+        <div className="card empty"><div className="art">🌙</div><b>{t("All quiet")}</b>
+          {t("No sessions or conversations yet.")}</div>
       )}
       {groups.map((g) => (
         <ProjectCard key={g.dir} g={g} control={control} onOpenConv={onOpenConv} onOpenSession={onOpenSession} onOpenTerm={onOpenTerm} />
       ))}
       {snap && !showHeader && (
         <>
-          <div className="section-label">This machine</div>
+          <div className="section-label">{t("This machine")}</div>
           <MachineFooter snap={snap} onRefreshUsage={onRefreshUsage} />
         </>
       )}
@@ -391,7 +403,7 @@ function MachineFooter({ snap, onRefreshUsage }: { snap: Snapshot; onRefreshUsag
         <h3>{snap.hostname}</h3>
         <div className="sub">{n} live session{n === 1 ? "" : "s"} · {accts.length} seat{accts.length === 1 ? "" : "s"} · active: <b>{active ? seatLabel(active) : "—"}</b></div>
       </div>
-      <button className="btn ghost small" onClick={onRefreshUsage}>↻ refresh</button>
+      <button className="btn ghost small" onClick={onRefreshUsage}>{t("↻ refresh")}</button>
     </div></div>
   );
 }
@@ -429,44 +441,44 @@ function SeatsBlock({ e, showHeader, control, onSwitch }: { e: Entry; showHeader
   }, [e.deck, e.online]);
   return (
     <>
-      {showHeader ? <MachineHeader e={e} /> : <div className="section-label">Seats</div>}
-      {!e.online && <div className="card empty"><div className="art">📡</div><b>Unreachable</b></div>}
+      {showHeader ? <MachineHeader e={e} /> : <div className="section-label">{t("Seats")}</div>}
+      {!e.online && <div className="card empty"><div className="art">📡</div><b>{t("Unreachable")}</b></div>}
       {e.online && !accts.length && (
-        <div className="card empty"><div className="art">🪑</div><b>No seats yet</b>
-          Log in and run <span className="mono">cux add</span> on the computer.</div>
+        <div className="card empty"><div className="art">🪑</div><b>{t("No seats yet")}</b>
+          {t("Log in and run ")}<span className="mono">cux add</span>{t(" on the computer.")}</div>
       )}
       {snap && accts.map((a) => {
         const u = (snap.usage || {})[cacheKey(a)];
         const f = u?.five_hour?.utilization ?? null, d7 = u?.seven_day?.utilization ?? null;
         const resets = ([[u?.five_hour, "5h"], [u?.seven_day, "7d"]] as const)
           .filter(([w]) => w && w.utilization >= 90 && w.resets_at)
-          .map(([w, l]) => l + " window frees in " + inTime(w!.resets_at!));
+          .map(([w, l]) => l + " " + t("window frees in") + " " + inTime(w!.resets_at!));
         return (
           <div key={a.slot} className="card">
             <div className="row" style={{ marginBottom: u ? 12 : 0 }}>
               <div className="grow">
                 <h3 className="ellip">{seatLabel(a)}</h3>
-                <div className="sub ellip">{a.email} · slot {a.slot}</div>
+                <div className="sub ellip">{a.email} · {t("slot")} {a.slot}</div>
               </div>
               {a.slot === snap.activeSlot
-                ? <span className="badge active">active</span>
-                : control ? <button className="btn ghost small" onClick={() => onSwitch(a)}>switch</button> : null}
+                ? <span className="badge active">{t("active")}</span>
+                : control ? <button className="btn ghost small" onClick={() => onSwitch(a)}>{t("switch")}</button> : null}
             </div>
             {u ? (
               <>
                 <div className="row" style={{ gap: 22, justifyContent: "center", padding: "4px 0 14px" }}>
-                  <Ring pct={f} cap="5H USED" /><Ring pct={d7} cap="7D USED" />
+                  <Ring pct={f} cap={t("5H USED")} /><Ring pct={d7} cap={t("7D USED")} />
                 </div>
                 {resets.length > 0 && <div className="sub" style={{ textAlign: "center", marginTop: 6, paddingBottom: 4 }}>⏳ {resets.join(" · ")}</div>}
-                {u.token_expired && <div className="sub" style={{ color: "var(--bad)", textAlign: "center" }}>⚠ needs login on the computer</div>}
+                {u.token_expired && <div className="sub" style={{ color: "var(--bad)", textAlign: "center" }}>{t("⚠ needs login on the computer")}</div>}
                 {(hist[cacheKey(a)]?.length ?? 0) >= 2 && (
                   <div style={{ marginTop: 4 }}>
-                    <div className="sub" style={{ fontSize: 10.5, marginBottom: 2 }}>5H TREND</div>
+                    <div className="sub" style={{ fontSize: 10.5, marginBottom: 2 }}>{t("5H TREND")}</div>
                     <Spark pts={hist[cacheKey(a)].map((p) => p.five)} />
                   </div>
                 )}
               </>
-            ) : <div className="sub">no usage data yet — tap refresh on the Deck tab</div>}
+            ) : <div className="sub">{t("no usage data yet — tap refresh on the Deck tab")}</div>}
           </div>
         );
       })}
@@ -482,20 +494,20 @@ function ProjectsBlock({ e, showHeader, control, onSeats, onCreate }: {
   return (
     <>
       <div className="row" style={{ alignItems: "center" }}>
-        {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>Projects</div>}
-        {e.online && control && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onCreate}>＋ new</button>}
+        {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>{t("Projects")}</div>}
+        {e.online && control && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onCreate}>{t("＋ new")}</button>}
       </div>
-      {!e.online && <div className="card empty"><div className="art">📡</div><b>Unreachable</b></div>}
+      {!e.online && <div className="card empty"><div className="art">📡</div><b>{t("Unreachable")}</b></div>}
       {e.online && !ps.length && (
-        <div className="card empty"><div className="art">📁</div><b>No projects</b>
-          Pin a directory to chosen seats with ＋ new.</div>
+        <div className="card empty"><div className="art">📁</div><b>{t("No projects")}</b>
+          {t("Pin a directory to chosen seats with ＋ new.")}</div>
       )}
       {snap && ps.map((p) => (
         <div key={p.name} className="card">
           <div className="row">
             <div className="grow"><h3>{p.name}</h3>
               <div className="sub ellip mono" style={{ fontSize: 11.5 }}>{p.dir}</div></div>
-            {control && <button className="btn ghost small" onClick={() => onSeats(p)}>seats</button>}
+            {control && <button className="btn ghost small" onClick={() => onSeats(p)}>{t("seats")}</button>}
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
             {(p.slots || []).length
@@ -503,11 +515,28 @@ function ProjectsBlock({ e, showHeader, control, onSeats, onCreate }: {
                 const a = (snap.accounts || {})[sl];
                 return <span key={sl} className="badge active" style={{ textTransform: "none" }}>{a ? seatLabel(a) : "#" + sl}</span>;
               })
-              : <span className="sub">no seats pinned — full pool applies</span>}
+              : <span className="sub">{t("no seats pinned — full pool applies")}</span>}
           </div>
         </div>
       ))}
     </>
+  );
+}
+
+// LanguageCard switches the whole panel's language. The names stay in
+// their own language (English, Türkçe, …) — you recognise your own
+// language regardless of the current UI language.
+function LanguageCard() {
+  const lang = useLang();
+  return (
+    <div className="card">
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+        {LANGS.map((l) => (
+          <button key={l.code} className={"btn small" + (lang === l.code ? "" : " ghost")}
+            onClick={() => setLang(l.code)}>{l.label}</button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -517,55 +546,56 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
 }) {
   return (
     <>
-      <div className="section-label">Add a phone</div>
+      <div className="section-label">{t("Language")}</div>
+      <LanguageCard />
+      <div className="section-label">{t("Add a phone")}</div>
       <PairPhoneCard toast={toast} />
-      <div className="section-label">This machine</div>
+      <div className="section-label">{t("This machine")}</div>
       {fleet.filter((e) => e.online && canControl(e)).map((e) => (
         <MachineNameCard key={e.deck.id} e={e} toast={toast} />
       ))}
-      <div className="section-label">Startup</div>
+      <div className="section-label">{t("Startup")}</div>
       {fleet.filter((e) => e.online && canControl(e)).map((e) => (
         <StartupCard key={e.deck.id} e={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} />
       ))}
-      <div className="section-label">Software update</div>
+      <div className="section-label">{t("Software update")}</div>
       {fleet.filter((e) => e.online && canControl(e)).map((e) => (
         <UpdateCard key={e.deck.id} e={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} />
       ))}
-      <div className="section-label">Notifications</div>
+      <div className="section-label">{t("Notifications")}</div>
       <NotifyCard fleet={fleet} toast={toast} />
       <TelegramCard fleet={fleet} toast={toast} setSheet={setSheet} />
       <div className="row" style={{ alignItems: "center" }}>
-        <div className="section-label" style={{ flex: 1 }}>Machines in this fleet</div>
-        <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onAddMachine}>＋ add</button>
+        <div className="section-label" style={{ flex: 1 }}>{t("Machines in this fleet")}</div>
+        <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onAddMachine}>{t("＋ add")}</button>
       </div>
       {fleet.map((e) => (
         <div key={e.deck.id} className="card"><div className="row">
           <div className="grow"><h3>{machineName(e)}</h3>
-            <div className="sub">{e.online ? (e.snap ? "● online · " + e.snap.os + " · cuxdeck " + e.snap.version : "● online") : "○ unreachable"}
-              {e.deck.url ? "" : " · this device"}</div></div>
-          {e.deck.url ? <button className="btn danger small" onClick={() => onForget(e.deck)}>forget</button> : null}
+            <div className="sub">{e.online ? (e.snap ? t("● online") + " · " + e.snap.os + " · cuxdeck " + e.snap.version : t("● online")) : t("○ unreachable")}
+              {e.deck.url ? "" : " · " + t("this device")}</div></div>
+          {e.deck.url ? <button className="btn danger small" onClick={() => onForget(e.deck)}>{t("forget")}</button> : null}
         </div></div>
       ))}
-      <div className="section-label">Share &amp; team access</div>
+      <div className="section-label">{t("Share & team access")}</div>
       {fleet.filter((e) => e.online && canControl(e)).map((e) => (
         <div key={e.deck.id} className="card"><div className="row">
           <div className="grow"><h3>{machineName(e)}</h3>
-            <div className="sub">Invite someone to watch or help drive this machine.</div></div>
-          <button className="btn ghost small" onClick={() => setSheet(<InviteSheet e={e} toast={toast} />)}>invite</button>
+            <div className="sub">{t("Invite someone to watch or help drive this machine.")}</div></div>
+          <button className="btn ghost small" onClick={() => setSheet(<InviteSheet e={e} toast={toast} />)}>{t("invite")}</button>
         </div></div>
       ))}
       {fleet.some((e) => e.online && !canControl(e)) && (
-        <div className="card"><div className="sub">You have <b>view-only</b> access to {fleet.filter((e) => !canControl(e)).map(machineName).join(", ")} — watch and read, but controls are hidden.</div></div>
+        <div className="card"><div className="sub">{t("You have ")}<b>{t("view-only")}</b>{t(" access to ")}{fleet.filter((e) => !canControl(e)).map(machineName).join(", ")}{t(" — watch and read, but controls are hidden.")}</div></div>
       )}
-      <div className="section-label">Paired devices (per machine)</div>
+      <div className="section-label">{t("Paired devices (per machine)")}</div>
       {fleet.filter((e) => e.online && canControl(e)).map((e) => (
         <DeviceList key={e.deck.id} entry={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} setSheet={setSheet} />
       ))}
-      <div className="section-label">About</div>
+      <div className="section-label">{t("About")}</div>
       <div className="card">
         <h3>⌁ cuxdeck</h3>
-        <div className="sub" style={{ marginTop: 6 }}>The fleet is assembled here in your browser — each machine is a
-          separate deck with its own tunnel and token. Add another with its pairing link; forget it to drop it.</div>
+        <div className="sub" style={{ marginTop: 6 }}>{t("The fleet is assembled here in your browser — each machine is a separate deck with its own tunnel and token. Add another with its pairing link; forget it to drop it.")}</div>
       </div>
     </>
   );
@@ -587,16 +617,16 @@ function StartupCard({ e, label, toast }: { e: Entry; label: string; toast: (m: 
     try {
       await api(e.deck, "/api/service", { method: "POST", body: JSON.stringify({ enabled: !state.enabled }) });
       setState({ ...state, enabled: !state.enabled });
-      toast(!state.enabled ? "Will start at login" : "Won't start at login");
-    } catch (err) { toast("Failed: " + (err as Error).message, 3600); }
+      toast(!state.enabled ? t("Will start at login") : t("Won't start at login"));
+    } catch (err) { toast(t("Failed: ") + (err as Error).message, 3600); }
     finally { setBusy(false); }
   };
   return (
     <div className="card"><div className="row">
-      <div className="grow"><h3>Start at login{label ? " · " + label : ""}</h3>
-        <div className="sub">{state?.enabled ? "● launches when the computer starts" : "Launch cuxdeck automatically on boot."}</div></div>
+      <div className="grow"><h3>{t("Start at login")}{label ? " · " + label : ""}</h3>
+        <div className="sub">{state?.enabled ? t("● launches when the computer starts") : t("Launch cuxdeck automatically on boot.")}</div></div>
       <button className={"btn small" + (state?.enabled ? " danger" : "")} disabled={busy || !state} onClick={toggle}>
-        {busy ? "…" : state?.enabled ? "Turn off" : "Enable"}</button>
+        {busy ? "…" : state?.enabled ? t("Turn off") : t("Enable")}</button>
     </div></div>
   );
 }
@@ -617,19 +647,19 @@ function UpdateCard({ e, label, toast }: { e: Entry; label: string; toast: (m: s
     setInfo({ ...info, mode });
     try {
       await api(e.deck, "/api/update", { method: "POST", body: JSON.stringify({ mode }) });
-      toast(mode === "auto" ? "Updates install automatically" : mode === "notify" ? "You'll be told when an update is out" : "Update checks off");
-    } catch (err) { toast("Failed: " + (err as Error).message, 3600); load(); }
+      toast(mode === "auto" ? t("Updates install automatically") : mode === "notify" ? t("You'll be told when an update is out") : t("Update checks off"));
+    } catch (err) { toast(t("Failed: ") + (err as Error).message, 3600); load(); }
   };
   const install = async () => {
     setBusy(true);
     try {
       await api(e.deck, "/api/update", { method: "POST", body: JSON.stringify({ action: "install" }) });
-      toast("Updating… the deck will restart in a moment", 5000);
-    } catch (err) { toast("Failed: " + (err as Error).message, 3600); }
+      toast(t("Updating… the deck will restart in a moment"), 5000);
+    } catch (err) { toast(t("Failed: ") + (err as Error).message, 3600); }
     finally { setBusy(false); }
   };
   if (!info) return null;
-  const modes: Array<[string, string]> = [["off", "Off"], ["notify", "Notify"], ["auto", "Auto"]];
+  const modes: Array<[string, string]> = [["off", t("Off")], ["notify", t("Notify")], ["auto", t("Auto")]];
   return (
     <div className="card">
       <div className="row">
@@ -637,15 +667,15 @@ function UpdateCard({ e, label, toast }: { e: Entry; label: string; toast: (m: s
           <h3>cuxdeck {info.current}{label ? " · " + label : ""}</h3>
           <div className="sub">
             {info.available
-              ? "● v" + info.latest + " available"
+              ? "● v" + info.latest + " " + t("available")
               : info.latest && info.latest !== info.current
-                ? "up to date (latest v" + info.latest + ")"
-                : "up to date"}
+                ? t("up to date") + " (latest v" + info.latest + ")"
+                : t("up to date")}
           </div>
         </div>
         {info.available && (info.method === "homebrew"
-          ? <button className="btn small" disabled={busy} onClick={install}>{busy ? "…" : "Update now"}</button>
-          : <a className="btn small" style={{ textDecoration: "none" }} href="https://github.com/centrual/cuxdeck/releases/latest" target="_blank" rel="noopener">Download</a>)}
+          ? <button className="btn small" disabled={busy} onClick={install}>{busy ? "…" : t("Update now")}</button>
+          : <a className="btn small" style={{ textDecoration: "none" }} href="https://github.com/centrual/cuxdeck/releases/latest" target="_blank" rel="noopener">{t("Download")}</a>)}
       </div>
       <div className="seg" style={{ marginTop: 10 }}>
         {modes.map(([m, lbl]) => (
@@ -654,8 +684,8 @@ function UpdateCard({ e, label, toast }: { e: Entry; label: string; toast: (m: s
       </div>
       <div className="sub" style={{ marginTop: 6 }}>
         {info.mode === "auto"
-          ? (info.method === "homebrew" ? "Installs new releases automatically, then restarts." : "Auto-install needs a Homebrew install; you'll be notified instead.")
-          : info.mode === "notify" ? "Checks for new releases and tells you — you install." : "No update checks."}
+          ? (info.method === "homebrew" ? t("Installs new releases automatically, then restarts.") : t("Auto-install needs a Homebrew install; you'll be notified instead."))
+          : info.mode === "notify" ? t("Checks for new releases and tells you — you install.") : t("No update checks.")}
       </div>
     </div>
   );
@@ -674,34 +704,33 @@ function PairPhoneCard({ toast }: { toast: (m: string, ms?: number) => void }) {
       const r = await fetch("/local/pair-info");
       if (!r.ok) throw new Error(String(r.status));
       setInfo(await r.json());
-    } catch { setErr("Couldn't load the pairing QR."); }
+    } catch { setErr(t("Couldn't load the pairing QR.")); }
   }, []);
   useEffect(() => { if (isLocal) load(); }, [isLocal, load]);
   if (!isLocal) {
     return (
-      <div className="card"><div className="sub">To add a phone, open cuxdeck's panel <b>on the computer itself</b>
-        (menu-bar icon → “Open panel · pair a phone”). The scannable QR shows there.</div></div>
+      <div className="card"><div className="sub">{t("To add a phone, open cuxdeck's panel ")}<b>{t("on the computer itself")}</b>{t(" (menu-bar icon → “Open panel · pair a phone”). The scannable QR shows there.")}</div></div>
     );
   }
   const isTunnel = /^https:\/\//.test(info?.url || "");
   return (
     <div className="card" style={{ textAlign: "center" }}>
-      <div className="sub" style={{ marginBottom: 10 }}>Scan with your phone's camera — it opens cuxdeck on your phone, already paired.</div>
+      <div className="sub" style={{ marginBottom: 10 }}>{t("Scan with your phone's camera — it opens cuxdeck on your phone, already paired.")}</div>
       {err ? <div className="sub" style={{ color: "var(--bad)" }}>{err}</div>
-        : info ? <img src={info.qr} width={200} height={200} alt="pairing QR"
+        : info ? <img src={info.qr} width={200} height={200} alt={t("pairing QR")}
             style={{ borderRadius: 14, background: "#fff", padding: 10 }} />
-        : <div className="sub">loading…</div>}
+        : <div className="sub">{t("loading…")}</div>}
       {info && (
         <div style={{ marginTop: 12 }}>
           {/* The written address, so a phone that can't scan can just type
               it — and so it's obvious which tunnel URL is current (the
               trycloudflare address rotates on every restart, which is what
               strands a phone on a dead URL / Error 1033). */}
-          <div className="sub" style={{ marginBottom: 4 }}>{isTunnel ? "Or open this address on the phone:" : "Local address (no public tunnel yet):"}</div>
+          <div className="sub" style={{ marginBottom: 4 }}>{isTunnel ? t("Or open this address on the phone:") : t("Local address (no public tunnel yet):")}</div>
           <div className="mono" style={{ wordBreak: "break-all", fontSize: 13, padding: "8px 10px", background: "var(--card)", border: "1px solid var(--line)", borderRadius: 10 }}>{info.url}</div>
           <div className="row" style={{ gap: 8, marginTop: 8, justifyContent: "center" }}>
-            <button className="btn small" onClick={() => { navigator.clipboard?.writeText(info.link); toast("Pairing link copied — valid 10 min"); }}>Copy pairing link</button>
-            <button className="btn ghost small" onClick={() => { load(); toast("Fresh QR & link"); }}>↻ new</button>
+            <button className="btn small" onClick={() => { navigator.clipboard?.writeText(info.link); toast(t("Pairing link copied — valid 10 min")); }}>{t("Copy pairing link")}</button>
+            <button className="btn ghost small" onClick={() => { load(); toast(t("Fresh QR & link")); }}>{t("↻ new")}</button>
           </div>
         </div>
       )}
@@ -723,17 +752,17 @@ function MachineNameCard({ e, toast }: { e: Entry; toast: (m: string, ms?: numbe
     try {
       await api(e.deck, "/api/name", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
       setSaved(name.trim());
-      toast(name.trim() ? "Renamed to " + name.trim() : "Name reset to hostname");
-    } catch (err) { toast("Failed: " + (err as Error).message, 3600); }
+      toast(name.trim() ? t("Renamed to ") + name.trim() : t("Name reset to hostname"));
+    } catch (err) { toast(t("Failed: ") + (err as Error).message, 3600); }
     finally { setBusy(false); }
   };
   return (
     <div className="card">
-      <div className="sub" style={{ marginBottom: 6 }}>Shown across your fleet. Currently <b>{machineName(e)}</b>{e.snap?.os ? " · " + e.snap.os : ""}.</div>
+      <div className="sub" style={{ marginBottom: 6 }}>{t("Shown across your fleet. Currently ")}<b>{machineName(e)}</b>{e.snap?.os ? " · " + e.snap.os : ""}.</div>
       <div className="row" style={{ gap: 8 }}>
         <input style={{ flex: 1, background: "var(--card)", border: "1px solid var(--line)", color: "var(--fg)", padding: "10px 12px", borderRadius: 11, outline: "none" }}
-          value={name} onChange={(ev) => setName(ev.target.value)} placeholder="e.g. mac-studio" autoCapitalize="none" spellCheck={false} />
-        <button className="btn small" disabled={busy || name.trim() === saved} onClick={save}>Save</button>
+          value={name} onChange={(ev) => setName(ev.target.value)} placeholder={t("e.g. mac-studio")} autoCapitalize="none" spellCheck={false} />
+        <button className="btn small" disabled={busy || name.trim() === saved} onClick={save}>{t("Save")}</button>
       </div>
     </div>
   );
@@ -766,25 +795,25 @@ function NotifyCard({ fleet, toast }: { fleet: Entry[]; toast: (m: string, ms?: 
     try {
       if (on) {
         for (const e of online) await push.disable(e.deck);
-        setOn(false); toast("Notifications off");
+        setOn(false); toast(t("Notifications off"));
       } else {
-        if (!online.length) { toast("No reachable machine to enable"); return; }
+        if (!online.length) { toast(t("No reachable machine to enable")); return; }
         let ok = 0;
         for (const e of online) { try { if (await push.enable(e.deck)) ok++; } catch (err) { toast((err as Error).message, 3600); } }
-        if (ok) { setOn(true); toast("Notifications on for " + ok + " machine" + (ok === 1 ? "" : "s")); }
+        if (ok) { setOn(true); toast(t("Notifications on for ") + ok + " machine" + (ok === 1 ? "" : "s")); }
       }
     } finally { setBusy(false); }
   };
 
   if (!supported) return (
-    <div className="card"><div className="sub">This browser can't do Web Push. Add cuxdeck to your home screen (iOS 16.4+) or use a modern browser to get alerts.</div></div>
+    <div className="card"><div className="sub">{t("This browser can't do Web Push. Add cuxdeck to your home screen (iOS 16.4+) or use a modern browser to get alerts.")}</div></div>
   );
   return (
     <div className="card"><div className="row">
-      <div className="grow"><h3>Push alerts</h3>
-        <div className="sub">Seats exhausted, retries, finished runs, a moved tunnel — pushed to this device.</div></div>
+      <div className="grow"><h3>{t("Push alerts")}</h3>
+        <div className="sub">{t("Seats exhausted, retries, finished runs, a moved tunnel — pushed to this device.")}</div></div>
       <button className={"btn small" + (on ? " danger" : "")} disabled={busy} onClick={toggle}>
-        {busy ? "…" : on ? "Turn off" : "Enable"}</button>
+        {busy ? "…" : on ? t("Turn off") : t("Enable")}</button>
     </div></div>
   );
 }
@@ -807,19 +836,19 @@ function TelegramCard({ fleet, toast, setSheet }: {
 
   const disconnect = async () => {
     await api(deck, "/api/telegram/disconnect", { method: "POST", body: "{}" }).catch(() => {});
-    toast("Telegram disconnected"); load();
+    toast(t("Telegram disconnected")); load();
   };
   return (
     <div className="card"><div className="row">
       <TelegramMark size={34} />
       <div className="grow" style={{ marginLeft: 10 }}><h3>Telegram</h3>
         <div className="sub">{status?.linked
-          ? "● linked — alerts also go to your Telegram chat"
-          : "Get the same alerts in a Telegram chat that outlives any phone."}</div></div>
+          ? t("● linked — alerts also go to your Telegram chat")
+          : t("Get the same alerts in a Telegram chat that outlives any phone.")}</div></div>
       {status?.linked
-        ? <button className="btn danger small" onClick={disconnect}>unlink</button>
+        ? <button className="btn danger small" onClick={disconnect}>{t("unlink")}</button>
         : <button className="btn ghost small" onClick={() => setSheet(
-          <TelegramWizard deck={deck} toast={toast} onDone={() => { setSheet(null); load(); }} />)}>connect</button>}
+          <TelegramWizard deck={deck} toast={toast} onDone={() => { setSheet(null); load(); }} />)}>{t("connect")}</button>}
     </div></div>
   );
 }
@@ -875,9 +904,9 @@ function TelegramWizard({ deck, toast, onDone }: { deck: Deck; toast: (m: string
       tries++;
       try {
         const { linked } = await api<{ linked: boolean }>(deck, "/api/telegram/poll", { method: "POST", body: "{}" });
-        if (linked) { polling.current = false; toast("Telegram linked ✓"); onDone(); return; }
+        if (linked) { polling.current = false; toast(t("Telegram linked ✓")); onDone(); return; }
       } catch { /* keep trying */ }
-      if (tries < 90) setTimeout(tick, 2000); else { polling.current = false; toast("No message received — send your bot /start and retry"); }
+      if (tries < 90) setTimeout(tick, 2000); else { polling.current = false; toast(t("No message received — send your bot /start and retry")); }
     };
     setTimeout(tick, 1500);
   };
@@ -887,43 +916,43 @@ function TelegramWizard({ deck, toast, onDone }: { deck: Deck; toast: (m: string
     <>
       <div className="row" style={{ gap: 10, marginBottom: 4 }}>
         <TelegramMark size={30} />
-        <h2 style={{ margin: 0 }}>Connect Telegram</h2>
+        <h2 style={{ margin: 0 }}>{t("Connect Telegram")}</h2>
       </div>
-      <div className="sheet-sub">Free, ~1 minute. You make a personal bot, then paste its token — alerts arrive as chat messages.</div>
+      <div className="sheet-sub">{t("Free, ~1 minute. You make a personal bot, then paste its token — alerts arrive as chat messages.")}</div>
 
       {step === 1 ? (
         <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
-          <Step n={1} title={<>Open <b>BotFather</b> in Telegram</>}>
-            <div className="sub">Telegram's official bot for making bots — the blue ✓ verified one.</div>
+          <Step n={1} title={<>{t("Open ")}<b>BotFather</b>{t(" in Telegram")}</>}>
+            <div className="sub">{t("Telegram's official bot for making bots — the blue ✓ verified one.")}</div>
             {/* t.me works everywhere a browser does (desktop included),
                 unlike a tg:// deep link which needs the app installed. If a
                 network blocks t.me at the DNS level, the manual note below
                 still gets you there. */}
             <a className="btn small" style={{ display: "inline-block", marginTop: 6, textDecoration: "none" }}
-              href="https://t.me/BotFather" target="_blank" rel="noopener">Open @BotFather ›</a>
-            <div className="sub" style={{ marginTop: 6 }}>Button not working? Open Telegram and search <span className="mono">@BotFather</span> by hand.</div>
+              href="https://t.me/BotFather" target="_blank" rel="noopener">{t("Open @BotFather ›")}</a>
+            <div className="sub" style={{ marginTop: 6 }}>{t("Button not working? Open Telegram and search ")}<span className="mono">@BotFather</span>{t(" by hand.")}</div>
           </Step>
-          <Step n={2} title={<>Send it <span className="mono">/newbot</span></>}>
-            <TgBubble from="You">/newbot</TgBubble>
-            <TgBubble from="BotFather">Alright, a new bot. How are we going to call it? Please choose a name…</TgBubble>
-            <div className="sub" style={{ marginTop: 4 }}>Answer its two questions: a name (anything, e.g. <i>my cuxdeck</i>) and a username ending in <span className="mono">bot</span> (e.g. <span className="mono">oguz_cuxdeck_bot</span>).</div>
+          <Step n={2} title={<>{t("Send it ")}<span className="mono">/newbot</span></>}>
+            <TgBubble from={t("You")}>/newbot</TgBubble>
+            <TgBubble from="BotFather">{t("Alright, a new bot. How are we going to call it? Please choose a name…")}</TgBubble>
+            <div className="sub" style={{ marginTop: 4 }}>{t("Answer its two questions: a name (anything, e.g. ")}<i>my cuxdeck</i>{t(") and a username ending in ")}<span className="mono">bot</span>{t(" (e.g. ")}<span className="mono">oguz_cuxdeck_bot</span>).</div>
           </Step>
-          <Step n={3} title={<>Copy the token it sends back</>}>
-            <TgBubble from="BotFather">Done! Use this token to access the HTTP API:<br /><span className="mono" style={{ color: "var(--acc)" }}>7654321:AAH<span style={{ opacity: .6 }}>Ex4mpl3-tok3n-k33p-secret</span></span></TgBubble>
+          <Step n={3} title={<>{t("Copy the token it sends back")}</>}>
+            <TgBubble from="BotFather">{t("Done! Use this token to access the HTTP API:")}<br /><span className="mono" style={{ color: "var(--acc)" }}>7654321:AAH<span style={{ opacity: .6 }}>Ex4mpl3-tok3n-k33p-secret</span></span></TgBubble>
           </Step>
-          <div className="field" style={{ marginTop: 12 }}><label>Paste the bot token here</label>
+          <div className="field" style={{ marginTop: 12 }}><label>{t("Paste the bot token here")}</label>
             <input value={token} onChange={(e) => setToken(e.target.value)} placeholder="7654321:AAH…"
               autoCapitalize="none" autoComplete="off" spellCheck={false} /></div>
-          <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={saveToken}>{busy ? "Checking token…" : "Save & continue"}</button>
+          <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={saveToken}>{busy ? t("Checking token…") : t("Save & continue")}</button>
         </div>
       ) : (
         <div>
-          <Step n={4} title={<>Open your new bot and tap <b>Start</b></>}>
-            <div className="sub">Find it by the username you chose, open the chat, and press the big <b>Start</b> button (or send any message). That's how it learns where to send your alerts.</div>
+          <Step n={4} title={<>{t("Open your new bot and tap ")}<b>{t("Start")}</b></>}>
+            <div className="sub">{t("Find it by the username you chose, open the chat, and press the big ")}<b>{t("Start")}</b>{t(" button (or send any message). That's how it learns where to send your alerts.")}</div>
             <div className="tgstart">▶  START</div>
           </Step>
           <div className="cstat" style={{ justifyContent: "center", padding: "16px 0" }}>
-            <span className="spin">✳</span> waiting for your message…
+            <span className="spin">✳</span> {t("waiting for your message…")}
           </div>
         </div>
       )}
@@ -939,8 +968,8 @@ function DeviceList({ entry, label, toast, setSheet }: {
   useEffect(load, [load]);
   const doRevoke = async (id: string) => {
     setSheet(null);
-    try { await api(entry.deck, "/api/devices/revoke", { method: "POST", body: JSON.stringify({ id }) }); toast("Device revoked"); load(); }
-    catch (err) { toast("Failed: " + (err as Error).message); }
+    try { await api(entry.deck, "/api/devices/revoke", { method: "POST", body: JSON.stringify({ id }) }); toast(t("Device revoked")); load(); }
+    catch (err) { toast(t("Failed: ") + (err as Error).message); }
   };
   return (
     <>
@@ -949,19 +978,19 @@ function DeviceList({ entry, label, toast, setSheet }: {
       {devs?.map((d) => (
         <div key={d.id} className="card"><div className="row">
           <div className="grow"><h3>{d.name}</h3>
-            <div className="sub">paired {new Date(d.createdAt).toLocaleDateString()} · seen {ago(d.lastSeen)} ago</div></div>
+            <div className="sub">{t("paired ")}{new Date(d.createdAt).toLocaleDateString()}{t(" · seen ")}{ago(d.lastSeen)} {t("ago")}</div></div>
           <button className="btn danger small" onClick={() => setSheet(
             <>
-              <h2>Revoke {d.name}?</h2>
-              <div className="sheet-sub">That device loses access immediately and must pair again with a fresh code.</div>
+              <h2>{t("Revoke ")}{d.name}?</h2>
+              <div className="sheet-sub">{t("That device loses access immediately and must pair again with a fresh code.")}</div>
               <div className="row" style={{ gap: 10 }}>
-                <button className="btn ghost" style={{ flex: 1 }} onClick={() => setSheet(null)}>Cancel</button>
-                <button className="btn danger" style={{ flex: 1 }} onClick={() => doRevoke(d.id)}>Revoke</button>
+                <button className="btn ghost" style={{ flex: 1 }} onClick={() => setSheet(null)}>{t("Cancel")}</button>
+                <button className="btn danger" style={{ flex: 1 }} onClick={() => doRevoke(d.id)}>{t("Revoke")}</button>
               </div>
-            </>)}>revoke</button>
+            </>)}>{t("revoke")}</button>
         </div></div>
       ))}
-      {devs?.length === 0 && <div className="card empty">No devices.</div>}
+      {devs?.length === 0 && <div className="card empty">{t("No devices.")}</div>}
     </>
   );
 }
@@ -971,11 +1000,11 @@ function DeviceList({ entry, label, toast, setSheet }: {
 function ConfirmSwitch({ label, onCancel, onGo }: { label: string; onCancel: () => void; onGo: () => void }) {
   return (
     <>
-      <h2>Switch to {label}?</h2>
-      <div className="sheet-sub">Running sessions swap to this seat on their next relaunch; new sessions start on it immediately.</div>
+      <h2>{t("Switch to ")}{label}?</h2>
+      <div className="sheet-sub">{t("Running sessions swap to this seat on their next relaunch; new sessions start on it immediately.")}</div>
       <div className="row" style={{ gap: 10 }}>
-        <button className="btn ghost" style={{ flex: 1 }} onClick={onCancel}>Cancel</button>
-        <button className="btn" style={{ flex: 1 }} onClick={onGo}>Switch</button>
+        <button className="btn ghost" style={{ flex: 1 }} onClick={onCancel}>{t("Cancel")}</button>
+        <button className="btn" style={{ flex: 1 }} onClick={onGo}>{t("Switch")}</button>
       </div>
     </>
   );
@@ -988,15 +1017,15 @@ function ProjectSheet({ host, create, toast }: {
   const [dir, setDir] = useState("");
   return (
     <>
-      <h2>New project</h2>
-      <div className="sheet-sub">Pin a directory to its own set of seats.</div>
-      <div className="field"><label>Name</label>
+      <h2>{t("New project")}</h2>
+      <div className="sheet-sub">{t("Pin a directory to its own set of seats.")}</div>
+      <div className="field"><label>{t("Name")}</label>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="clientwork" autoCapitalize="none" autoComplete="off" /></div>
-      <div className="field"><label>Directory (absolute path on {host})</label>
+      <div className="field"><label>{t("Directory (absolute path on ")}{host})</label>
         <input value={dir} onChange={(e) => setDir(e.target.value)} placeholder="/Users/you/code/client" autoCapitalize="none" autoComplete="off" /></div>
       <button className="btn" style={{ width: "100%" }}
-        onClick={() => { if (!name.trim() || !dir.trim()) { toast("Name and directory are required"); return; } create(name.trim(), dir.trim()); }}>
-        Create project</button>
+        onClick={() => { if (!name.trim() || !dir.trim()) { toast(t("Name and directory are required")); return; } create(name.trim(), dir.trim()); }}>
+        {t("Create project")}</button>
     </>
   );
 }
@@ -1013,14 +1042,14 @@ function SpawnSheet({ e, onStart }: { e: Entry; onStart: (dir: string) => void }
   const [dir, setDir] = useState(recent[0] || "");
   return (
     <>
-      <h2>New session on {machineName(e)}</h2>
-      <div className="sheet-sub">cux starts in this directory and opens straight into the terminal. It keeps running after you close the tab.</div>
-      <div className="field"><label>Directory (absolute path)</label>
+      <h2>{t("New session on ")}{machineName(e)}</h2>
+      <div className="sheet-sub">{t("cux starts in this directory and opens straight into the terminal. It keeps running after you close the tab.")}</div>
+      <div className="field"><label>{t("Directory (absolute path)")}</label>
         <input value={dir} onChange={(ev) => setDir(ev.target.value)} placeholder="/Users/you/code/project"
           autoCapitalize="none" autoComplete="off" spellCheck={false} /></div>
       {recent.length > 0 && (
         <div style={{ margin: "2px 0 14px" }}>
-          <div className="sub" style={{ marginBottom: 6 }}>Recent</div>
+          <div className="sub" style={{ marginBottom: 6 }}>{t("Recent")}</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {recent.map((d) => (
               <div key={d} className="choice" style={{ padding: "9px 6px" }} onClick={() => setDir(d)}>
@@ -1031,7 +1060,7 @@ function SpawnSheet({ e, onStart }: { e: Entry; onStart: (dir: string) => void }
         </div>
       )}
       <button className="btn" style={{ width: "100%" }}
-        onClick={() => { if (dir.trim().startsWith("/")) onStart(dir.trim()); }}>Start session ⌨</button>
+        onClick={() => { if (dir.trim().startsWith("/")) onStart(dir.trim()); }}>{t("Start session ⌨")}</button>
     </>
   );
 }
@@ -1051,36 +1080,36 @@ function InviteSheet({ e, toast }: { e: Entry; toast: (m: string, ms?: number) =
       const { code, url } = await api<{ code: string; url: string }>(e.deck, "/api/invite", { method: "POST", body: JSON.stringify({ role }) });
       const origin = (url || e.deck.url || location.origin).replace(/\/$/, "");
       if (!/^https:\/\//.test(origin)) {
-        toast("This machine has no public tunnel yet — can't invite remotely", 4000);
+        toast(t("This machine has no public tunnel yet — can't invite remotely"), 4000);
         return;
       }
       setLink(origin + "/#p=" + code);
-    } catch (err) { toast("Failed: " + (err as Error).message, 3600); }
+    } catch (err) { toast(t("Failed: ") + (err as Error).message, 3600); }
     finally { setBusy(false); }
   };
-  const copy = async () => { try { await navigator.clipboard.writeText(link); toast("Link copied"); } catch { toast("Copy failed — long-press to select"); } };
+  const copy = async () => { try { await navigator.clipboard.writeText(link); toast(t("Link copied")); } catch { toast(t("Copy failed — long-press to select")); } };
   return (
     <>
-      <h2>Invite to {machineName(e)}</h2>
+      <h2>{t("Invite to ")}{machineName(e)}</h2>
       {!link ? (
         <>
-          <div className="sheet-sub">Pick what they can do, then share the one-time link. It works for 10 minutes and links one device.</div>
+          <div className="sheet-sub">{t("Pick what they can do, then share the one-time link. It works for 10 minutes and links one device.")}</div>
           <div style={{ margin: "4px 0 14px" }}>
-            {([["view", "View only", "Watch sessions, read conversations. No switching, spawning, or terminal."],
-               ["control", "Full control", "Everything you can do — switch seats, start sessions, drive terminals."]] as const).map(([r, title, desc]) => (
+            {([["view", t("View only"), t("Watch sessions, read conversations. No switching, spawning, or terminal.")],
+               ["control", t("Full control"), t("Everything you can do — switch seats, start sessions, drive terminals.")]] as const).map(([r, title, desc]) => (
               <div key={r} className={"choice" + (role === r ? " on" : "")} onClick={() => setRole(r)}>
                 <div className="tick">✓</div>
                 <div className="grow"><b>{title}</b><div className="sub">{desc}</div></div>
               </div>
             ))}
           </div>
-          <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={make}>{busy ? "…" : "Create invite link"}</button>
+          <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={make}>{busy ? "…" : t("Create invite link")}</button>
         </>
       ) : (
         <>
-          <div className="sheet-sub">Send this to your teammate — one device, 10 minutes, <b>{role === "view" ? "view-only" : "full control"}</b>.</div>
+          <div className="sheet-sub">{t("Send this to your teammate — one device, 10 minutes, ")}<b>{role === "view" ? t("view-only") : t("full control")}</b>.</div>
           <div className="field"><input readOnly value={link} onFocus={(ev) => ev.currentTarget.select()} /></div>
-          <button className="btn" style={{ width: "100%" }} onClick={copy}>Copy link</button>
+          <button className="btn" style={{ width: "100%" }} onClick={copy}>{t("Copy link")}</button>
         </>
       )}
     </>
@@ -1091,11 +1120,11 @@ function AddMachineSheet({ add }: { add: (link: string) => void }) {
   const [link, setLink] = useState("");
   return (
     <>
-      <h2>Add a machine</h2>
-      <div className="sheet-sub">On the other computer run <span className="mono">cuxdeck qr</span> (or read its terminal) and paste the pairing link here — it looks like <span className="mono">https://…trycloudflare.com/#p=CODE</span>.</div>
-      <div className="field"><label>Pairing link</label>
+      <h2>{t("Add a machine")}</h2>
+      <div className="sheet-sub">{t("On the other computer run ")}<span className="mono">cuxdeck qr</span>{t(" (or read its terminal) and paste the pairing link here — it looks like ")}<span className="mono">https://…trycloudflare.com/#p=CODE</span>.</div>
+      <div className="field"><label>{t("Pairing link")}</label>
         <input value={link} onChange={(e) => setLink(e.target.value)} placeholder="https://…/#p=…" autoCapitalize="none" autoComplete="off" spellCheck={false} /></div>
-      <button className="btn" style={{ width: "100%" }} onClick={() => add(link)}>Add machine</button>
+      <button className="btn" style={{ width: "100%" }} onClick={() => add(link)}>{t("Add machine")}</button>
     </>
   );
 }
@@ -1111,18 +1140,18 @@ function SeatSheet({ project, snap, deck, toast, refresh, act, close }: {
   const save = async () => {
     close();
     const adds = [...want].filter((s) => !had.has(s)), dels = [...had].filter((s) => !want.has(s));
-    if (!adds.length && !dels.length) { toast("No changes"); return; }
-    toast("Saving seats…");
+    if (!adds.length && !dels.length) { toast(t("No changes")); return; }
+    toast(t("Saving seats…"));
     try {
       for (const s of adds) await api(deck, "/api/action", { method: "POST", body: JSON.stringify({ action: "project-assign", args: { name: project.name, seat: String(s) } }) });
       for (const s of dels) await api(deck, "/api/action", { method: "POST", body: JSON.stringify({ action: "project-unassign", args: { name: project.name, seat: String(s) } }) });
-      toast("Saved ✓"); refresh();
-    } catch (e) { toast("Failed: " + (e as Error).message); }
+      toast(t("Saved ✓")); refresh();
+    } catch (e) { toast(t("Failed: ") + (e as Error).message); }
   };
   return (
     <>
-      <h2>{project.name} seats</h2>
-      <div className="sheet-sub">Pinned seats form this project's pool. A seat can serve several projects.</div>
+      <h2>{project.name} {t("seats")}</h2>
+      <div className="sheet-sub">{t("Pinned seats form this project's pool. A seat can serve several projects.")}</div>
       <div>
         {accts.map((a) => (
           <div key={a.slot} className={"choice" + (want.has(a.slot) ? " on" : "")} onClick={() => toggle(a.slot)}>
@@ -1132,8 +1161,8 @@ function SeatSheet({ project, snap, deck, toast, refresh, act, close }: {
         ))}
       </div>
       <div className="row" style={{ gap: 10, marginTop: 14 }}>
-        <button className="btn danger" onClick={() => { close(); if (confirm("Remove project " + project.name + "? Accounts stay.")) act(deck, "project-remove", { name: project.name }, "Removing…"); }}>Remove</button>
-        <button className="btn" style={{ flex: 1 }} onClick={save}>Save</button>
+        <button className="btn danger" onClick={() => { close(); if (confirm(t("Remove project ") + project.name + t("? Accounts stay."))) act(deck, "project-remove", { name: project.name }, t("Removing…")); }}>{t("Remove")}</button>
+        <button className="btn" style={{ flex: 1 }} onClick={save}>{t("Save")}</button>
       </div>
     </>
   );
@@ -1164,7 +1193,7 @@ function Pair({ onPaired }: { onPaired: () => void }) {
       upsertDeck({ id: "self", url: "", token });
       history.replaceState(null, "", location.pathname);
       onPaired();
-    } catch { setErr("Invalid or expired code — generate a fresh one on the computer."); }
+    } catch { setErr(t("Invalid or expired code — generate a fresh one on the computer.")); }
   }, [onPaired]);
 
   // Phone arriving via a scanned link: pair automatically.
@@ -1177,7 +1206,7 @@ function Pair({ onPaired }: { onPaired: () => void }) {
       const r = await fetch("/local/pairing", { method: "POST" });
       const { code } = await r.json();
       await go(code);
-    } catch { setErr("Couldn't pair — is the daemon running?"); }
+    } catch { setErr(t("Couldn't pair — is the daemon running?")); }
     finally { setBusy(false); }
   }, [go]);
 
@@ -1187,20 +1216,20 @@ function Pair({ onPaired }: { onPaired: () => void }) {
       <h2 className="mono">cuxdeck<span className="cur">_</span></h2>
       {isLocal ? (
         <>
-          <p>Scan this with your phone to add it — or pair this computer with one tap.</p>
-          <img src="/local/qr.png" width={220} height={220} alt="pairing QR"
+          <p>{t("Scan this with your phone to add it — or pair this computer with one tap.")}</p>
+          <img src="/local/qr.png" width={220} height={220} alt={t("pairing QR")}
             style={{ borderRadius: 16, background: "#fff", padding: 10 }}
             onError={(e) => { (e.currentTarget.style.display = "none"); }} />
           <button className="btn" style={{ width: 250 }} disabled={busy} onClick={pairSelf}>
-            {busy ? "…" : "Pair this computer"}</button>
-          <div className="sub" style={{ fontSize: 12 }}>The QR opens the phone straight onto your tunnel — no code to type.</div>
+            {busy ? "…" : t("Pair this computer")}</button>
+          <div className="sub" style={{ fontSize: 12 }}>{t("The QR opens the phone straight onto your tunnel — no code to type.")}</div>
         </>
       ) : (
         <>
-          <p>Enter the pairing code shown on your computer, or scan its QR. One device, one code — that's the whole setup.</p>
+          <p>{t("Enter the pairing code shown on your computer, or scan its QR. One device, one code — that's the whole setup.")}</p>
           <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="··········"
             autoComplete="off" autoCapitalize="characters" spellCheck={false} />
-          <button className="btn" style={{ width: 250 }} onClick={() => go(code.trim())}>Pair this device</button>
+          <button className="btn" style={{ width: 250 }} onClick={() => go(code.trim())}>{t("Pair this device")}</button>
         </>
       )}
       <div id="pairErr">{err}</div>

@@ -72,6 +72,10 @@ type Server struct {
 	UpdateMode    func() string
 	SetUpdateMode func(string) error
 	RunUpdate     func() error
+	// Lang / SetLang read and set the language used for push/Telegram
+	// notifications, mirroring the panel's own language choice.
+	Lang    func() string
+	SetLang func(string) error
 }
 
 // Handler returns the full route table.
@@ -104,6 +108,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/service", s.controlled(s.serviceSet))
 	mux.HandleFunc("GET /api/update", s.authed(s.updateGet))
 	mux.HandleFunc("POST /api/update", s.controlled(s.updateSet))
+	mux.HandleFunc("GET /api/lang", s.authed(s.getLang))
+	mux.HandleFunc("POST /api/lang", s.controlled(s.setLang))
 	mux.HandleFunc("POST /local/pairing", s.localOnly(s.newPairing))
 	mux.HandleFunc("GET /local/qr.png", s.localOnly(s.pairingQR))
 	mux.HandleFunc("GET /local/pair-info", s.localOnly(s.pairInfo))
@@ -258,6 +264,33 @@ func (s *Server) deck(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, snap)
+}
+
+func (s *Server) getLang(w http.ResponseWriter, r *http.Request) {
+	lang := ""
+	if s.Lang != nil {
+		lang = s.Lang()
+	}
+	writeJSON(w, map[string]string{"lang": lang})
+}
+
+func (s *Server) setLang(w http.ResponseWriter, r *http.Request) {
+	if s.SetLang == nil {
+		http.Error(w, `{"error":"not supported here"}`, http.StatusServiceUnavailable)
+		return
+	}
+	var in struct {
+		Lang string `json:"lang"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	if err := s.SetLang(in.Lang); err != nil {
+		http.Error(w, `{"error":"`+err.Error()+`"}`, http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, map[string]string{"lang": in.Lang})
 }
 
 func (s *Server) getName(w http.ResponseWriter, r *http.Request) {

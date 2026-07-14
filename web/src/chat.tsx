@@ -7,6 +7,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { sseURL } from "./api";
 import type { Deck } from "./decks";
+import { t } from "./i18n";
 import { firstln, fmtDur, fmtTok, md } from "./util";
 
 type Ev = {
@@ -79,20 +80,20 @@ function applyTaskEvent(st: Stream, ev: Ev) {
     // with emptiness when the list was cleaned up.
     st.snap = true;
     st.tasks = new Map();
-    try { (JSON.parse(ev.text || "[]") as Task[]).forEach((t) => st.tasks.set(t.id, t)); } catch {}
+    try { (JSON.parse(ev.text || "[]") as Task[]).forEach((tb) => st.tasks.set(tb.id, tb)); } catch {}
   } else if (ev.kind === "todos") {
     try {
-      st.todos = (JSON.parse(ev.text || "[]") as any[]).map((t, i) => ({ id: String(i + 1), subject: t.content, status: t.status }));
+      st.todos = (JSON.parse(ev.text || "[]") as any[]).map((tb, i) => ({ id: String(i + 1), subject: tb.content, status: tb.status }));
     } catch {}
   } else if (st.snap) {
     return; // transcript replay can't override the store
   } else if (ev.kind === "task-create") {
     st.tasks.set(ev.tool || "", { id: ev.tool || "", subject: ev.text || "", status: "pending" });
   } else if (ev.kind === "task-update") {
-    const t = st.tasks.get(ev.tool || "") || { id: ev.tool || "", subject: ev.detail || "task #" + ev.tool, status: "pending" };
-    if (ev.text) t.status = ev.text;
-    if (ev.detail) t.subject = ev.detail;
-    st.tasks.set(ev.tool || "", t);
+    const tb = st.tasks.get(ev.tool || "") || { id: ev.tool || "", subject: ev.detail || "task #" + ev.tool, status: "pending" };
+    if (ev.text) tb.status = ev.text;
+    if (ev.detail) tb.subject = ev.detail;
+    st.tasks.set(ev.tool || "", tb);
   }
 }
 
@@ -117,7 +118,7 @@ function applyEvent(st: Stream, ev: Ev) {
     else {
       // close the previous turn the way the CLI does
       if (!ev.detail && st.turnStart && st.lastAssistTs > st.turnStart) {
-        push(st, { k: "divider", kind: "worked", text: "✳ Worked for " + fmtDur(st.lastAssistTs - st.turnStart) } as any);
+        push(st, { k: "divider", kind: "worked", text: t("✳ Worked for ") + fmtDur(st.lastAssistTs - st.turnStart) } as any);
       }
       const chip = ev.detail === "queued" ? "queued" : ev.detail === "sent mid-turn" ? "mid" : "";
       push(st, { k: "user", text: ev.text || "", chip } as any);
@@ -153,12 +154,12 @@ function applyEvent(st: Stream, ev: Ev) {
       break;
     }
     case "ask":
-      if (ev.kind === "question") push(st, { k: "ask", head: ev.tool || "question", q: ev.text || "", opts: ev.detail } as any);
+      if (ev.kind === "question") push(st, { k: "ask", head: ev.tool || t("question"), q: ev.text || "", opts: ev.detail } as any);
       else push(st, { k: "answer", text: ev.text || "" } as any);
       break;
     case "divider":
       if (ev.kind === "command") { markDelivered(st, ev.text || ""); push(st, { k: "divider", kind: "command", text: ev.text || "" } as any); }
-      else if (ev.kind === "interrupt") push(st, { k: "divider", kind: "interrupt", text: "Interrupted · user sent a new instruction" } as any);
+      else if (ev.kind === "interrupt") push(st, { k: "divider", kind: "interrupt", text: t("Interrupted · user sent a new instruction") } as any);
       else push(st, { k: "divider", kind: "plain", text: ev.detail || ev.text || "" } as any);
       break;
   }
@@ -187,7 +188,7 @@ function Row({ it }: { it: Item }) {
       return (
         <div className="uline"><span className="pfx">❯</span>
           <span style={{ minWidth: 0 }}>{it.text}
-            {it.chip && <span className="chip">{it.chip === "queued" ? "⏳ queued — waiting for Claude" : "⏱ sent mid-turn"}</span>}
+            {it.chip && <span className="chip">{it.chip === "queued" ? t("⏳ queued — waiting for Claude") : t("⏱ sent mid-turn")}</span>}
           </span>
         </div>
       );
@@ -196,14 +197,14 @@ function Row({ it }: { it: Item }) {
     case "think":
       return (
         <div className={"think" + (open ? " open" : "")} onClick={() => setOpen(!open)}>
-          <span className="tprev">✻ Thinking… {firstln(it.text)}</span>
+          <span className="tprev">{t("✻ Thinking… ")}{firstln(it.text)}</span>
           <span className="tbody">✻ {it.text}</span>
         </div>
       );
     case "image":
       return it.user
-        ? <div className="uline"><span className="pfx">❯</span><span>[Image]</span></div>
-        : <div className="aline">[Image]</div>;
+        ? <div className="uline"><span className="pfx">❯</span><span>{t("[Image]")}</span></div>
+        : <div className="aline">{t("[Image]")}</div>;
     case "tool":
       return (
         <div className={"tline" + (it.res ? "" : " pending")}>
@@ -228,7 +229,7 @@ function Row({ it }: { it: Item }) {
         </div>
       );
     case "answer":
-      return <div className="cask answer"><div className="qhead">answered</div>{it.text}</div>;
+      return <div className="cask answer"><div className="qhead">{t("answered")}</div>{it.text}</div>;
     case "divider":
       if (it.kind === "command") return <div className="cdiv command"><span style={{ color: "var(--faint)" }}>❯</span> {it.text}</div>;
       if (it.kind === "worked") return <div className="worked">{it.text}</div>;
@@ -257,16 +258,16 @@ function TasksBar({ tasks, todos, snap }: { tasks: Task[]; todos: Task[] | null;
   let items = tasks;
   if (!items.length && !snap && todos) items = todos;
   if (!items.length) return null;
-  const done = items.filter((t) => t.status === "completed").length;
+  const done = items.filter((tb) => tb.status === "completed").length;
   const mark = (s: string) => (s === "completed" ? "✓" : s === "in_progress" ? "◐" : "○");
   return (
     <div id="ctasks" className={"show" + (open ? " open" : "")} onClick={() => setOpen(!open)}>
-      <div className="thead"><span>☑ Tasks</span><span className="prog">{done}/{items.length} done</span>
+      <div className="thead"><span>{t("☑ Tasks")}</span><span className="prog">{done}/{items.length} {t("done")}</span>
         <span className="prog" style={{ marginLeft: "auto" }}>▾</span></div>
       <div className="tlist">
-        {items.map((t) => (
-          <div key={t.id} className={"titem " + (t.status || "pending")}>
-            <span className="mark">{mark(t.status)}</span><span>{t.subject}</span>
+        {items.map((tb) => (
+          <div key={tb.id} className={"titem " + (tb.status || "pending")}>
+            <span className="mark">{mark(tb.status)}</span><span>{tb.subject}</span>
           </div>
         ))}
       </div>
@@ -276,18 +277,18 @@ function TasksBar({ tasks, todos, snap }: { tasks: Task[]; todos: Task[] | null;
 
 /* CLI-style status: "✳ Running Bash… (42s · turn 10m · ↓ 38k tokens)" */
 function statusLine(st: Stream, now: number): { line: string; busy: boolean } {
-  if (!st.last || !st.lastTs) return { line: "live", busy: false };
+  if (!st.last || !st.lastTs) return { line: t("live"), busy: false };
   const idle = now - st.lastTs;
   const turn = st.turnStart ? fmtDur(now - st.turnStart) : "";
-  const tok = st.turnTokens ? " · ↓ " + fmtTok(st.turnTokens) + " tokens" : "";
-  if (idle > 150000) return { line: "Idle · last activity " + fmtDur(idle) + " ago", busy: false };
+  const tok = st.turnTokens ? " · ↓ " + fmtTok(st.turnTokens) + t(" tokens") : "";
+  if (idle > 150000) return { line: t("Idle · last activity ") + fmtDur(idle) + t(" ago"), busy: false };
   if (st.last.role === "tool" || st.last.role === "result") {
     const name = ((st.last.role === "tool" ? st.last.tool : st.last.text) || "tool").split("__").pop();
-    const head = st.last.role === "tool" ? "Running " + name + "… (" + fmtDur(idle) : "Working… (" + fmtDur(idle);
-    return { line: head + (turn ? " · turn " + turn : "") + tok + ")", busy: true };
+    const head = st.last.role === "tool" ? t("Running ") + name + "… (" + fmtDur(idle) : t("Working… (") + fmtDur(idle);
+    return { line: head + (turn ? t(" · turn ") + turn : "") + tok + ")", busy: true };
   }
-  if (st.last.role === "user") return { line: "Thinking… (" + fmtDur(idle) + tok + ")", busy: true };
-  return { line: "Working… (" + (turn || fmtDur(idle)) + tok + ")", busy: true };
+  if (st.last.role === "user") return { line: t("Thinking… (") + fmtDur(idle) + tok + ")", busy: true };
+  return { line: t("Working… (") + (turn || fmtDur(idle)) + tok + ")", busy: true };
 }
 
 export function Chat({ deck, path, title, sub, onClose }: {
@@ -311,7 +312,7 @@ export function Chat({ deck, path, title, sub, onClose }: {
       try { applyEvent(streamRef.current, JSON.parse(e.data)); } catch {}
     };
     const flush = setInterval(() => {
-      if (streamRef.current.dirty) { streamRef.current.dirty = false; setTick((t) => t + 1); }
+      if (streamRef.current.dirty) { streamRef.current.dirty = false; setTick((tb) => tb + 1); }
     }, 120);
     const clock = setInterval(() => setNow(Date.now()), 1000);
     // Lock the page behind the overlay so inner and outer scrolling
@@ -333,8 +334,8 @@ export function Chat({ deck, path, title, sub, onClose }: {
   const st = streamRef.current;
   const { line, busy } = useMemo(() => statusLine(st, now), [st.items.length, st.caughtUp, now]);
   const pending = [...st.queued.values()].filter((e) => e.st === "pending").length;
-  const qsuf = pending ? " · ⏳ " + pending + " queued" : "";
-  const subLine = !st.caughtUp ? "loading history…" : (sub ? sub + " · " : "") + (busy ? "✳ " : "") + line + qsuf;
+  const qsuf = pending ? " · ⏳ " + pending + t(" queued") : "";
+  const subLine = !st.caughtUp ? t("loading history…") : (sub ? sub + " · " : "") + (busy ? "✳ " : "") + line + qsuf;
 
   return (
     <div id="chat" className="show">
@@ -345,12 +346,12 @@ export function Chat({ deck, path, title, sub, onClose }: {
       <TasksBar tasks={[...st.tasks.values()]} todos={st.todos} snap={st.snap} />
       <div id="clog" ref={logRef}
         onScroll={() => { const l = logRef.current!; atBottom.current = l.scrollHeight - l.scrollTop - l.clientHeight < 80; }}>
-        <div className="readonly">👁 read-only — sending comes next</div>
+        <div className="readonly">{t("👁 read-only — sending comes next")}</div>
         {st.items.map((it) => <Row key={it.key} it={it} />)}
         {st.caughtUp && (
           <div className="cstat">
-            {busy ? <><span className="spin">✳</span> {line}<span className="sdetail"> · live</span></>
-              : <><span className="pulse"></span><span className="sdetail">live — watching for new messages</span></>}
+            {busy ? <><span className="spin">✳</span> {line}<span className="sdetail">{t(" · live")}</span></>
+              : <><span className="pulse"></span><span className="sdetail">{t("live — watching for new messages")}</span></>}
           </div>
         )}
       </div>

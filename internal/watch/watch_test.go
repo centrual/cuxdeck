@@ -39,9 +39,13 @@ func TestResetHintPicksEarliest(t *testing.T) {
 		"a": {FiveHour: &cuxdata.Window{Utilization: 100, ResetsAt: &late}},
 		"b": {SevenDay: &cuxdata.Window{Utilization: 100, ResetsAt: &soon}},
 	}}
-	got := resetHint(d)
+	got := resetHint(d, "")
 	if got == "Waiting for a window to reset" {
 		t.Fatalf("expected a concrete hint, got %q", got)
+	}
+	// Turkish localizes the fixed prefix while the duration stays numeric.
+	if tr := resetHint(d, "tr"); tr == got || tr == "" {
+		t.Fatalf("expected a translated hint for tr, got %q (en was %q)", tr, got)
 	}
 }
 

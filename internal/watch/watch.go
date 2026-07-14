@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/centrual/cuxdeck/internal/cuxdata"
+	"github.com/centrual/cuxdeck/internal/i18n"
 	"github.com/centrual/cuxdeck/internal/notify"
 )
 
@@ -50,22 +51,28 @@ func (f fan) Has() bool {
 // Run polls every interval and notifies via every target. It never
 // fires on the first snapshot (that would announce state that predates
 // the phone) and does nothing while no channel has a recipient.
-func Run(targets []notify.Notifier, interval time.Duration) {
+// lang, when non-nil, returns the language code (tr/fr/de/it/en) the
+// user picked in the panel, so notifications go out in that language.
+func Run(targets []notify.Notifier, interval time.Duration, lang func() string) {
 	p := fan(targets)
 	pr := prev{sessions: map[int]sessState{}, expired: map[string]bool{}}
 	for {
 		time.Sleep(interval)
+		lg := ""
+		if lang != nil {
+			lg = lang()
+		}
 		if !p.Has() {
 			// Nobody listening — keep the baseline current so we don't
 			// dump a backlog of transitions when someone subscribes.
-			pr = snapshotInto(pr, false, p)
+			pr = snapshotInto(pr, false, p, lg)
 			continue
 		}
-		pr = snapshotInto(pr, pr.seen, p)
+		pr = snapshotInto(pr, pr.seen, p, lg)
 	}
 }
 
-func snapshotInto(pr prev, emit bool, p notify.Notifier) prev {
+func snapshotInto(pr prev, emit bool, p notify.Notifier, lg string) prev {
 	d := cuxdata.Snapshot("", time.Now)
 
 	cur := map[int]sessState{}
@@ -81,16 +88,17 @@ func snapshotInto(pr prev, emit bool, p notify.Notifier) prev {
 				continue // brand-new session isn't itself notable
 			}
 			if was.state != now.state {
+				seat := i18n.T(lg, " · seat ") + now.seat
 				switch now.state {
 				case "retrying":
-					p.Notify(notify.Event{Title: "API trouble — retrying", Body: now.dir + " · seat " + now.seat, Tag: "retry-" + itoa(pid)})
+					p.Notify(notify.Event{Title: i18n.T(lg, "API trouble — retrying"), Body: now.dir + seat, Tag: "retry-" + itoa(pid)})
 				case "waiting-reset":
-					p.Notify(notify.Event{Title: "All limits hit — waiting for reset", Body: now.dir + " · seat " + now.seat, Tag: "wait-" + itoa(pid)})
+					p.Notify(notify.Event{Title: i18n.T(lg, "All limits hit — waiting for reset"), Body: now.dir + seat, Tag: "wait-" + itoa(pid)})
 				case "running":
 					if was.state == "retrying" {
-						p.Notify(notify.Event{Title: "Recovered — back to work", Body: now.dir + " · seat " + now.seat, Tag: "retry-" + itoa(pid)})
+						p.Notify(notify.Event{Title: i18n.T(lg, "Recovered — back to work"), Body: now.dir + seat, Tag: "retry-" + itoa(pid)})
 					} else if was.state == "waiting-reset" {
-						p.Notify(notify.Event{Title: "Limits reset — resumed", Body: now.dir + " · seat " + now.seat, Tag: "wait-" + itoa(pid)})
+						p.Notify(notify.Event{Title: i18n.T(lg, "Limits reset — resumed"), Body: now.dir + seat, Tag: "wait-" + itoa(pid)})
 					}
 				}
 			}
@@ -98,19 +106,19 @@ func snapshotInto(pr prev, emit bool, p notify.Notifier) prev {
 		// finished sessions
 		for pid, was := range pr.sessions {
 			if _, still := cur[pid]; !still {
-				p.Notify(notify.Event{Title: "Session finished", Body: was.dir + " · ran " + dur(time.Since(was.start)), Tag: "done-" + itoa(pid)})
+				p.Notify(notify.Event{Title: i18n.T(lg, "Session finished"), Body: was.dir + i18n.T(lg, " · ran ") + dur(time.Since(was.start)), Tag: "done-" + itoa(pid)})
 			}
 		}
 		// seat needs re-login
 		for key, u := range d.Usage {
 			if u.TokenExpired && !pr.expired[key] {
-				p.Notify(notify.Event{Title: "A seat needs re-login", Body: "Sign in again on the computer to keep the pool full", Tag: "relogin"})
+				p.Notify(notify.Event{Title: i18n.T(lg, "A seat needs re-login"), Body: i18n.T(lg, "Sign in again on the computer to keep the pool full"), Tag: "relogin"})
 			}
 		}
 		// all seats exhausted (edge-triggered)
 		exh := allExhausted(d)
 		if exh && !pr.exhausted {
-			p.Notify(notify.Event{Title: "Every seat is exhausted", Body: resetHint(d), Tag: "exhausted"})
+			p.Notify(notify.Event{Title: i18n.T(lg, "Every seat is exhausted"), Body: resetHint(d, lg), Tag: "exhausted"})
 		}
 	}
 
@@ -141,7 +149,7 @@ func atCeiling(u cuxdata.AccountUsage) bool {
 }
 
 // resetHint names the earliest window that will free up, if known.
-func resetHint(d cuxdata.Deck) string {
+func resetHint(d cuxdata.Deck, lg string) string {
 	var earliest *time.Time
 	for _, u := range d.Usage {
 		for _, w := range []*cuxdata.Window{u.FiveHour, u.SevenDay} {
@@ -151,9 +159,9 @@ func resetHint(d cuxdata.Deck) string {
 		}
 	}
 	if earliest == nil {
-		return "Waiting for a window to reset"
+		return i18n.T(lg, "Waiting for a window to reset")
 	}
-	return "Frees up in " + dur(time.Until(*earliest))
+	return i18n.T(lg, "Frees up in ") + dur(time.Until(*earliest))
 }
 
 /* ---------- tiny local helpers (no deps) ---------- */

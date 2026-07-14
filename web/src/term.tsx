@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { wsURL } from "./api";
+import { t } from "./i18n";
 import type { Deck } from "./decks";
 
 const FRAME_OUT = 0, FRAME_INPUT = 1, FRAME_RESIZE = 2;
@@ -112,7 +113,7 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
       const d = new Uint8Array(e.data as ArrayBuffer);
       if (d.length >= 5 && d[0] === FRAME_OUT) term.write(d.subarray(5));
     };
-    ws.onclose = () => term.write("\r\n\x1b[33m[cuxdeck] bağlantı kapandı\x1b[0m\r\n");
+    ws.onclose = () => term.write("\r\n\x1b[33m" + t("[cuxdeck] connection closed") + "\x1b[0m\r\n");
 
     term.onData((s: string) => { if (ws.readyState === WebSocket.OPEN) ws.send(frame(FRAME_INPUT, enc.encode(s))); });
 
@@ -177,7 +178,7 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
     <div id="chat" className="show" style={{ background: "#0c0a09" }}>
       <div className="chead" ref={head}>
         <button className="back" onClick={onClose}>‹</button>
-        <div className="grow"><h2>{title}</h2><div className="sub">live terminal — full control</div></div>
+        <div className="grow"><h2>{title}</h2><div className="sub">{t("live terminal — full control")}</div></div>
       </div>
       <div ref={holder} style={{ flex: 1, minHeight: 0, padding: "6px 4px 0 8px", touchAction: "none" }} />
       {/* Input-accessory-style bar: invisible until an on-screen
