@@ -92,7 +92,6 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(holder.current!);
-    fit.fit();
 
     const ws = new WebSocket(wsURL(deck, "/api/session/" + pid + "/term", deck.token));
     ws.binaryType = "arraybuffer";
@@ -100,7 +99,7 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
     const enc = new TextEncoder();
 
     const sendResize = () => {
-      if (ws.readyState !== WebSocket.OPEN) return;
+      if (ws.readyState !== WebSocket.OPEN || term.cols < 1 || term.rows < 1) return;
       const p = new Uint8Array(4);
       const dv = new DataView(p.buffer);
       dv.setUint16(0, term.rows);
@@ -108,7 +107,29 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
       ws.send(frame(FRAME_RESIZE, p));
     };
 
-    ws.onopen = sendResize;
+    // Refit and, only when the grid actually changed, tell the PTY its new
+    // size. Claude Code addresses the screen by absolute column, so the
+    // PTY width must match what xterm renders exactly — a stale count
+    // scrambles the layout (words break, cursor lands in the wrong place).
+    let lastCols = 0, lastRows = 0;
+    const refit = () => {
+      try { fit.fit(); } catch { /* holder not laid out yet */ }
+      if (term.cols !== lastCols || term.rows !== lastRows) {
+        lastCols = term.cols;
+        lastRows = term.rows;
+        sendResize();
+      }
+    };
+    // Fitting synchronously at open can measure a stale monospace cell and
+    // over-count columns. Fit once the container is laid out (next frame)
+    // and again once font metrics are final, then keep it correct with a
+    // ResizeObserver — that also covers the on-screen keyboard and rotation.
+    requestAnimationFrame(refit);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(refit).catch(() => {});
+    const ro = new ResizeObserver(() => refit());
+    ro.observe(holder.current!);
+
+    ws.onopen = () => { refit(); sendResize(); };
     ws.onmessage = (e) => {
       const d = new Uint8Array(e.data as ArrayBuffer);
       if (d.length >= 5 && d[0] === FRAME_OUT) term.write(d.subarray(5));
@@ -150,7 +171,7 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
     el.addEventListener("touchstart", onTouchStart, { passive: true });
     el.addEventListener("touchmove", onTouchMove, { passive: false });
 
-    const onResize = () => { fit.fit(); sendResize(); };
+    const onResize = () => { refit(); };
     reflowRef.current = onResize;
     window.addEventListener("resize", onResize);
     document.body.classList.add("chat-open");
@@ -160,6 +181,7 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
     setTimeout(() => term.focus(), 300);
 
     return () => {
+      ro.disconnect();
       window.removeEventListener("resize", onResize);
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
