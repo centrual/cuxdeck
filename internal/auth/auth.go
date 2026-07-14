@@ -30,7 +30,17 @@ import (
 const (
 	pairingTTL      = 10 * time.Minute
 	maxFailureDelay = 8 * time.Second
+	pairCodeLen     = 16 // base32 chars → 80 bits of entropy
 )
+
+// newCode returns a fresh random pairing code: pairCodeLen chars of
+// crockford-ish base32, ~80 bits — infeasible to guess inside the
+// 10-minute, single-use window.
+func newCode() string {
+	raw := make([]byte, 10) // 10 bytes = 80 bits = 16 base32 chars
+	_, _ = rand.Read(raw)
+	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw)[:pairCodeLen]
+}
 
 // Device is one paired client (a phone, a tablet, a browser).
 type Device struct {
@@ -109,19 +119,16 @@ func (s *Store) save() {
 	_ = os.Rename(tmp, s.path)
 }
 
-// NewPairingCode returns a fresh single-use code: 10 chars of
-// crockford-ish base32, comfortable to type by hand when there is no
-// camera, ~50 bits — plenty for a 10-minute window behind exponential
-// backoff. Multiple codes can be outstanding at once: the menu bar, the
-// panel's "add a phone" card, and the tunnel banner each mint their own,
-// and a fresh mint must NOT invalidate a code a phone is mid-scan on.
+// NewPairingCode returns a fresh single-use code (~80 bits, mostly used
+// via QR/link but still typable by hand). Multiple codes can be
+// outstanding at once: the menu bar, the panel's "add a phone" card, and
+// the tunnel banner each mint their own, and a fresh mint must NOT
+// invalidate a code a phone is mid-scan on.
 func (s *Store) NewPairingCode(role string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.prunePairings()
-	raw := make([]byte, 7)
-	_, _ = rand.Read(raw)
-	code := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw)[:10]
+	code := newCode()
 	if s.pairings == nil {
 		s.pairings = make(map[string]pairEntry)
 	}
@@ -148,9 +155,7 @@ func (s *Store) NewRepairCode(deviceID string) string {
 	if !found {
 		return ""
 	}
-	raw := make([]byte, 7)
-	_, _ = rand.Read(raw)
-	code := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw)[:10]
+	code := newCode()
 	if s.pairings == nil {
 		s.pairings = make(map[string]pairEntry)
 	}
