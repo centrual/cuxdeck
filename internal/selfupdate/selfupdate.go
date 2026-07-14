@@ -135,7 +135,13 @@ func Upgrade(ctx context.Context) error {
 		return fmt.Errorf("brew update: %v: %s", err, out)
 	}
 	if out, err := exec.CommandContext(ctx, brew, "upgrade", "--cask", "cuxdeck").CombinedOutput(); err != nil {
-		return fmt.Errorf("brew upgrade: %v: %s", err, out)
+		// Once the app has been launched, its quarantine flag was cleared
+		// and its signature re-touched, so brew refuses to upgrade it
+		// "as-is". A forced reinstall of the newest cask is the reliable
+		// path in that (normal, post-first-run) state.
+		if out2, err2 := exec.CommandContext(ctx, brew, "reinstall", "--cask", "--force", "cuxdeck").CombinedOutput(); err2 != nil {
+			return fmt.Errorf("brew upgrade: %v: %s; reinstall: %v: %s", err, out, err2, out2)
+		}
 	}
 	// Best-effort: strip quarantine so the LaunchAgent can relaunch it.
 	_ = exec.CommandContext(ctx, "xattr", "-dr", "com.apple.quarantine", "/Applications/cuxdeck.app").Run()
