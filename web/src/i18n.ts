@@ -63,6 +63,7 @@ type Table = Record<string, string>;
 
 const tr: Table = {
   // nav + tabs
+  "terminal": "terminal",
   "Deck": "Panel",
   "Seats": "Koltuklar",
   "Projects": "Projeler",
@@ -311,6 +312,7 @@ const tr: Table = {
 };
 
 const fr: Table = {
+  "terminal": "terminal",
   "Deck": "Tableau",
   "Seats": "Sièges",
   "Projects": "Projets",
@@ -548,6 +550,7 @@ const fr: Table = {
 };
 
 const de: Table = {
+  "terminal": "Terminal",
   "Deck": "Übersicht",
   "Seats": "Plätze",
   "Projects": "Projekte",
@@ -785,6 +788,7 @@ const de: Table = {
 };
 
 const it: Table = {
+  "terminal": "terminale",
   "Deck": "Pannello",
   "Seats": "Postazioni",
   "Projects": "Progetti",

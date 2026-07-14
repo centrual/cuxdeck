@@ -317,20 +317,25 @@ function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
         </div>
       </div>
 
-      {g.sessions.map(({ s, conv }) => (
-        <div key={s.pid} className="srow tappable" onClick={() => (conv ? onOpenConv(conv) : onOpenSession(s))}>
-          <span className="dot" style={{ color: stateColor[s.state] || "var(--dim)" }}>▎</span>
-          <div className="grow" style={{ minWidth: 0 }}>
-            <div className="ellip" style={{ fontWeight: 600 }}>{conv?.title || t("(starting…)")}</div>
-            <div className="sub">{t("seat ")}<b>{s.seat ? s.seat.split("@")[0] : "—"}</b> · {t("up")} {ago(s.startedAt)}
-              {s.detail ? " · ↻ " + s.detail : ""}</div>
+      {g.sessions.map(({ s, conv }) => {
+        // An attachable session opens straight into its live terminal on
+        // tap — that's the full view of what it's doing, so there's no
+        // separate button to get squeezed by a long title. The ⌨ hint
+        // sits on the meta line, which the title never crowds.
+        const canTerm = s.attachable && control;
+        return (
+          <div key={s.pid} className="srow tappable"
+            onClick={() => (canTerm ? onOpenTerm(s) : conv ? onOpenConv(conv) : onOpenSession(s))}>
+            <span className="dot" style={{ color: stateColor[s.state] || "var(--dim)" }}>▎</span>
+            <div className="grow" style={{ minWidth: 0 }}>
+              <div className="ellip" style={{ fontWeight: 600 }}>{conv?.title || t("(starting…)")}</div>
+              <div className="sub">{t("seat ")}<b>{s.seat ? s.seat.split("@")[0] : "—"}</b> · {t("up")} {ago(s.startedAt)}
+                {s.detail ? " · ↻ " + s.detail : ""}
+                {canTerm ? <> · <span style={{ color: "var(--acc)", fontWeight: 700 }}>⌨ {t("terminal")}</span></> : null}</div>
+            </div>
           </div>
-          {s.attachable && control && (
-            <button className="btn ghost small" style={{ flex: "none" }} title={t("live terminal — full control")}
-              onClick={(ev) => { ev.stopPropagation(); onOpenTerm(s); }}>⌨</button>
-          )}
-        </div>
-      ))}
+        );
+      })}
 
       {liveHistory.map((c) => (
         <div key={c.id} className="srow tappable" onClick={() => onOpenConv(c)}>
