@@ -79,7 +79,13 @@ function TelegramMark({ size }: { size: number }) {
 export default function App() {
   const [decks, setDecks] = useState<Deck[]>(getDecks());
   const [fleet, setFleet] = useState<Entry[]>([]);
-  const [tab, setTab] = useState<"deck" | "seats" | "projects" | "settings">("deck");
+  // Remember the last tab across reloads so a refresh doesn't bounce you
+  // back to Deck.
+  const [tab, setTab] = useState<"deck" | "seats" | "projects" | "settings">(() => {
+    const saved = localStorage.getItem("cuxdeck-tab");
+    return saved === "seats" || saved === "projects" || saved === "settings" ? saved : "deck";
+  });
+  useEffect(() => { try { localStorage.setItem("cuxdeck-tab", tab); } catch { /* ignore */ } }, [tab]);
   const [chat, setChat] = useState<{ deck: Deck; path: string; title: string; sub: string } | null>(null);
   const [termSess, setTermSess] = useState<{ deck: Deck; pid: number; title: string } | null>(null);
   const [sheet, setSheet] = useState<React.ReactNode | null>(null);
@@ -466,7 +472,7 @@ function SeatsBlock({ e, showHeader, control, onSwitch }: { e: Entry; showHeader
             </div>
             {u ? (
               <>
-                <div className="row" style={{ gap: 22, justifyContent: "center", padding: "4px 0 14px" }}>
+                <div className="row" style={{ gap: 22, justifyContent: "center", padding: "4px 0 20px" }}>
                   <Ring pct={f} cap={t("5H USED")} /><Ring pct={d7} cap={t("7D USED")} />
                 </div>
                 {resets.length > 0 && <div className="sub" style={{ textAlign: "center", marginTop: 6, paddingBottom: 4 }}>⏳ {resets.join(" · ")}</div>}
