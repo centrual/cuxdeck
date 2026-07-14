@@ -42,7 +42,7 @@ main{padding:6px 16px 8px;display:flex;flex-direction:column;gap:12px;max-width:
 .sub{color:var(--dim);font-size:12.5px}
 .mono{font-family:ui-monospace,"SF Mono",monospace}
 .row{display:flex;align-items:center;gap:10px}
-.row .grow{flex:1;min-width:0}
+.grow{flex:1;min-width:0}
 .ellip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
 /* ---------- badges & bars ---------- */

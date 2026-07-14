@@ -336,13 +336,16 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 			showPairing(st, u)
 			// The accountless Quick Tunnel picks a new address every time
 			// the daemon (re)starts, so a device left on the old URL 404s.
-			// Announce the new address on every channel — crucially
-			// Telegram, whose chat is independent of the tunnel origin, so
-			// it works even though the Web Push subscription is tied to
-			// the old (now-dead) origin. The message carries the URL
-			// itself, so it's a tap away wherever it lands.
+			// The new URL is also a new browser origin, so the phone's
+			// stored token doesn't carry over — it has to pair again.
+			// Announce a full pairing LINK (URL + single-use code), not just
+			// the bare URL, so one tap re-pairs. Telegram is the channel
+			// that matters here: its chat is independent of the tunnel
+			// origin, so it lands even though the Web Push subscription is
+			// tied to the old (now-dead) origin.
 			if len(prev) > 0 && string(prev) != u {
-				ev := notify.Event{Title: i18n.T(langOf(), "cuxdeck moved — new address"), Body: u, Tag: "tunnel-url"}
+				link := u + "/#p=" + st.NewPairingCode(auth.RoleControl)
+				ev := notify.Event{Title: i18n.T(langOf(), "cuxdeck moved — new address"), Body: link, Tag: "tunnel-url"}
 				if pushStore != nil {
 					pushStore.Notify(ev)
 				}

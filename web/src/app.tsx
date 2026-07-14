@@ -326,7 +326,7 @@ function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
               {s.detail ? " · ↻ " + s.detail : ""}</div>
           </div>
           {s.attachable && control && (
-            <button className="btn ghost small" style={{ flex: "none" }}
+            <button className="btn ghost small" style={{ flex: "none" }} title={t("live terminal — full control")}
               onClick={(ev) => { ev.stopPropagation(); onOpenTerm(s); }}>⌨</button>
           )}
         </div>
