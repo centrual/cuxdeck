@@ -68,10 +68,20 @@ type Store struct {
 
 // pairEntry is one outstanding pairing code: the role it grants and when
 // it expires. Codes live only in memory — short-lived secrets never
-// touch disk — so a daemon restart naturally clears them.
+// touch disk — so a daemon restart naturally clears them. When device is
+// non-empty the code re-pairs THAT device (renews its token) instead of
+// creating a new one.
 type pairEntry struct {
-	role string
-	exp  time.Time
+	role   string
+	exp    time.Time
+	device string
+}
+
+// DeviceInfo is the token-free view of a paired device.
+type DeviceInfo struct {
+	ID   string
+	Name string
+	Role string
 }
 
 // Open loads (or initialises) the device store at dir/devices.json.
@@ -119,6 +129,47 @@ func (s *Store) NewPairingCode(role string) string {
 	return code
 }
 
+// NewRepairCode mints a single-use code bound to an existing device:
+// using it renews that device's token (same id/name/role) rather than
+// creating a new one. Returns "" if the device is unknown. Used to hand
+// each paired device its own reconnect link when the tunnel address
+// changes.
+func (s *Store) NewRepairCode(deviceID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prunePairings()
+	role, found := "", false
+	for _, d := range s.devices {
+		if d.ID == deviceID {
+			role, found = normRole(d.Role), true
+			break
+		}
+	}
+	if !found {
+		return ""
+	}
+	raw := make([]byte, 7)
+	_, _ = rand.Read(raw)
+	code := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw)[:10]
+	if s.pairings == nil {
+		s.pairings = make(map[string]pairEntry)
+	}
+	s.pairings[code] = pairEntry{role: role, exp: time.Now().Add(pairingTTL), device: deviceID}
+	return code
+}
+
+// DeviceList returns the paired devices without their token hashes, for
+// callers that need to enumerate them (e.g. to address each by name).
+func (s *Store) DeviceList() []DeviceInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]DeviceInfo, 0, len(s.devices))
+	for _, d := range s.devices {
+		out = append(out, DeviceInfo{ID: d.ID, Name: d.Name, Role: normRole(d.Role)})
+	}
+	return out
+}
+
 // prunePairings drops expired codes so the map can't grow without bound.
 // Callers must hold s.mu.
 func (s *Store) prunePairings() {
@@ -152,6 +203,24 @@ func (s *Store) Pair(code, name string) (token string, err error) {
 	}
 	token = base64.RawURLEncoding.EncodeToString(rawTok)
 	sum := sha256.Sum256([]byte(token))
+
+	// Re-pair: a code bound to an existing device renews its token in
+	// place (same id, name and role) instead of adding a duplicate. This
+	// is what the "tunnel moved" links do — each device gets back onto
+	// the new address as itself.
+	if entry.device != "" {
+		for i := range s.devices {
+			if s.devices[i].ID == entry.device {
+				s.devices[i].TokenHash = hex.EncodeToString(sum[:])
+				s.devices[i].LastSeen = time.Now().UTC()
+				s.save()
+				return token, nil
+			}
+		}
+		// The device was forgotten in the meantime — fall through and
+		// create a fresh one so the code still works.
+	}
+
 	rawID := make([]byte, 6)
 	_, _ = rand.Read(rawID)
 	if name == "" {

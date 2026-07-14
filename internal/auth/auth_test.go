@@ -58,6 +58,47 @@ func TestPairIsSingleUse(t *testing.T) {
 	}
 }
 
+// TestRepairRenewsDeviceInPlace covers the per-device reconnect links:
+// a repair code renews one device's token without creating a duplicate,
+// preserving its id/name/role, and invalidating the old token.
+func TestRepairRenewsDeviceInPlace(t *testing.T) {
+	s := newTestStore(t)
+	tok1, err := s.Pair(s.NewPairingCode(RoleView), "phone")
+	if err != nil {
+		t.Fatalf("initial pair: %v", err)
+	}
+	devs := s.DeviceList()
+	if len(devs) != 1 {
+		t.Fatalf("want 1 device, got %d", len(devs))
+	}
+	id := devs[0].ID
+
+	code := s.NewRepairCode(id)
+	if code == "" {
+		t.Fatal("expected a repair code for a known device")
+	}
+	tok2, err := s.Pair(code, "some-other-name")
+	if err != nil {
+		t.Fatalf("re-pair: %v", err)
+	}
+	devs = s.DeviceList()
+	if len(devs) != 1 {
+		t.Fatalf("re-pair should not duplicate: got %d devices", len(devs))
+	}
+	if devs[0].ID != id || devs[0].Name != "phone" || devs[0].Role != RoleView {
+		t.Fatalf("re-pair changed identity: %+v", devs[0])
+	}
+	if !s.Authenticate(tok2) {
+		t.Fatal("new token should authenticate")
+	}
+	if s.Authenticate(tok1) {
+		t.Fatal("old token should be invalid after re-pair")
+	}
+	if s.NewRepairCode("nope") != "" {
+		t.Fatal("repair code for an unknown device should be empty")
+	}
+}
+
 func TestPairRejectsUnknownCode(t *testing.T) {
 	s := newTestStore(t)
 	if _, err := s.Pair("NOTAREALCODE", "x"); err != ErrBadPairing {

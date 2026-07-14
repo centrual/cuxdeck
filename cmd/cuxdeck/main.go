@@ -344,12 +344,30 @@ func runDaemon(st *auth.Store, port int, noTunnel bool) {
 			// origin, so it lands even though the Web Push subscription is
 			// tied to the old (now-dead) origin.
 			if len(prev) > 0 && string(prev) != u {
-				link := u + "/#p=" + st.NewPairingCode(auth.RoleControl)
-				ev := notify.Event{Title: i18n.T(langOf(), "cuxdeck moved — new address"), Body: link, Tag: "tunnel-url"}
-				if pushStore != nil {
-					pushStore.Notify(ev)
+				lg := langOf()
+				title := i18n.T(lg, "cuxdeck moved — new address")
+				devs := st.DeviceList()
+				// Telegram (origin-independent, so it actually arrives):
+				// one reconnect link per device, labelled by name, each
+				// renewing that device in place. Fall back to a single
+				// generic pairing link when nothing is paired yet.
+				tgBody := u
+				if len(devs) == 0 {
+					tgBody = u + "/#p=" + st.NewPairingCode(auth.RoleControl)
+				} else {
+					for _, d := range devs {
+						if c := st.NewRepairCode(d.ID); c != "" {
+							tgBody += "\n\n" + d.Name + ": " + u + "/#p=" + c
+						}
+					}
 				}
-				tgStore.Notify(ev)
+				tgStore.Notify(notify.Event{Title: title, Body: tgBody, Tag: "tunnel-url"})
+				// Web Push rides the old (now-dead) origin's subscription,
+				// so it rarely lands; send a short generic link, not the
+				// full per-device list.
+				if pushStore != nil {
+					pushStore.Notify(notify.Event{Title: title, Body: u + "/#p=" + st.NewPairingCode(auth.RoleControl), Tag: "tunnel-url"})
+				}
 			}
 		},
 	}
