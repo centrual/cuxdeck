@@ -591,12 +591,29 @@ body.chat-open{overflow:hidden;position:fixed;top:0;left:0;right:0;bottom:auto;
              status pinned at the bottom, prompt-style ▍ on the active
              tab). Overlays (#chat, terminal) stay full-screen — a
              terminal wants every pixel it can get. */
-.navbrand,.navhost{display:none}
+.navbrand,.navhost,.navsessions{display:none}
+nav button.navgrid{display:none}
+
+/* ---------- workspace: user-composed wall of live terminals ---------- */
+.wsbar .wscols{width:132px;flex:none}
+.wswrap{display:grid;gap:12px;grid-template-columns:repeat(var(--wscols,1),1fr);
+  grid-auto-rows:minmax(280px,1fr);height:calc(100dvh - 220px);min-height:320px;
+  overflow-y:auto;overscroll-behavior:contain}
+.wstile{display:flex;flex-direction:column;min-width:0;min-height:0;background:#0c0a09;
+  border:1px solid var(--line);border-radius:var(--r);overflow:hidden;animation:rise .3s both}
+.wthead{display:flex;align-items:center;gap:8px;padding:7px 12px;border-bottom:1px solid var(--line);
+  background:var(--card);font-size:12.5px;flex:none;min-width:0}
+.wthead .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+.wthead b{flex:0 1 auto;min-width:0}
+.wtbtn{background:none;border:0;color:var(--faint);cursor:pointer;padding:5px;line-height:0;
+  border-radius:6px;flex:none;transition:color .15s,background .15s}
+.wtbtn:hover{color:var(--fg);background:#ffffff0a}
+.wtbody{flex:1;min-height:0;position:relative}
 
 @media (min-width:720px){
   main{max-width:1100px;display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
     gap:14px;align-items:start;padding:10px 24px 8px}
-  main>.section-label,main>.row,main>.skel,main>.mhead,main>.card.empty{grid-column:1/-1}
+  main>.section-label,main>.row,main>.skel,main>.mhead,main>.card.empty,main>.wswrap{grid-column:1/-1}
   main>.section-label{margin-bottom:0}
   /* Sheets become centered modals — a bottom drawer on a 27" display
      reads as a lost phone UI. Same transition feel, new resting place. */
@@ -625,6 +642,23 @@ body.chat-open{overflow:hidden;position:fixed;top:0;left:0;right:0;bottom:auto;
   /* the active tab carries a prompt caret, same voice as `cuxdeck_` */
   nav button.on::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
     border-radius:99px;background:var(--acc)}
+  nav button.navgrid{display:flex}
+  .navcount{margin-left:auto;background:#ff8b6a1f;color:var(--acc);font-size:10.5px;
+    font-weight:800;border-radius:99px;padding:1px 7px}
+  /* the rail's live-session list: one row per running session, click
+     to tile it into the workspace (highlighted while tiled) */
+  .navsessions{display:flex;flex-direction:column;gap:1px;margin-top:14px;padding-top:12px;
+    border-top:1px solid var(--line);flex:1 1 auto;min-height:0;overflow-y:auto}
+  .navsessions .nslabel{font-size:10px;font-weight:800;letter-spacing:1.2px;color:var(--faint);
+    text-transform:uppercase;padding:0 8px 7px}
+  .nsrow{display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;
+    color:var(--dim);padding:7px 8px;border-radius:8px;cursor:pointer;font-size:12.5px;
+    text-align:left;transition:background .15s,color .15s;min-width:0}
+  .nsrow:hover{background:#ffffff06;color:var(--fg)}
+  .nsrow.on{color:var(--fg);background:#ff8b6a10}
+  .nsrow .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}
+  .nsrow .nsseat{font-size:10.5px;color:var(--faint);flex:none}
+  .wswrap{height:calc(100vh - 130px)}
   .navbrand{display:flex;align-items:center;gap:9px;padding:2px 6px 16px;
     border-bottom:1px solid var(--line);margin-bottom:10px}
   .navbrand .logo{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;

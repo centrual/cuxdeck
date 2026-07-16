@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, deviceName, pair, setUnauthorizedHandler } from "./api";
 import { getDecks, hasDecks, noteDeckMeta, parsePairLink, removeDeck, upsertDeck, type Deck } from "./decks";
 import { Chat } from "./chat";
-import { Term } from "./term";
+import { Term, TermView } from "./term";
 import * as push from "./push";
 import { ago, inTime, shortDir } from "./util";
 import { t, useLang, setLang, LANGS } from "./i18n";
@@ -166,13 +166,32 @@ export default function App() {
   const [fleet, setFleet] = useState<Entry[]>([]);
   // Remember the last tab across reloads so a refresh doesn't bounce you
   // back to Deck.
-  const [tab, setTab] = useState<"deck" | "seats" | "projects" | "settings">(() => {
+  const [tab, setTab] = useState<"deck" | "grid" | "seats" | "projects" | "settings">(() => {
     const saved = localStorage.getItem("cuxdeck-tab");
-    return saved === "seats" || saved === "projects" || saved === "settings" ? saved : "deck";
+    return saved === "grid" || saved === "seats" || saved === "projects" || saved === "settings" ? saved : "deck";
   });
   useEffect(() => { try { localStorage.setItem("cuxdeck-tab", tab); } catch { /* ignore */ } }, [tab]);
   const [chat, setChat] = useState<{ deck: Deck; path: string; title: string; sub: string } | null>(null);
   const [termSess, setTermSess] = useState<{ deck: Deck; pid: number; title: string } | null>(null);
+  // The workspace: live-terminal tiles the user composes on big screens
+  // (pick sessions from the rail, they open side by side / stacked).
+  // Persisted so a reload restores the same wall of terminals; a tile
+  // whose session has exited just shows the closed-connection notice.
+  const [tiles, setTiles] = useState<Array<{ deckId: string; pid: number; title: string; sub: string }>>(() => {
+    try { return JSON.parse(localStorage.getItem("cuxdeck-ws-tiles") || "[]"); } catch { return []; }
+  });
+  const [wsCols, setWsCols] = useState<number>(() => {
+    const n = parseInt(localStorage.getItem("cuxdeck-ws-cols") || "1", 10);
+    return n >= 1 && n <= 3 ? n : 1;
+  });
+  useEffect(() => { try { localStorage.setItem("cuxdeck-ws-tiles", JSON.stringify(tiles)); } catch { /* ignore */ } }, [tiles]);
+  useEffect(() => { try { localStorage.setItem("cuxdeck-ws-cols", String(wsCols)); } catch { /* ignore */ } }, [wsCols]);
+  const tileKey = (deckId: string, pid: number) => deckId + "·" + pid;
+  const toggleTile = (deckId: string, pid: number, title: string, sub: string) => {
+    setTiles((ts) => ts.some((x) => tileKey(x.deckId, x.pid) === tileKey(deckId, pid))
+      ? ts.filter((x) => tileKey(x.deckId, x.pid) !== tileKey(deckId, pid))
+      : [...ts, { deckId, pid, title, sub }]);
+  };
   const [sheet, setSheet] = useState<React.ReactNode | null>(null);
   const [toastMsg, setToastMsg] = useState("");
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(null);
@@ -291,6 +310,12 @@ export default function App() {
             onRefreshUsage={() => act(e.deck, "usage-refresh", {}, t("Refreshing usage…"))} />
         ))}
 
+        {tab === "grid" && (
+          <Workspace fleet={fleet} tiles={tiles} cols={wsCols} setCols={setWsCols}
+            onClose={(deckId, pid) => setTiles((ts) => ts.filter((x) => !(x.deckId === deckId && x.pid === pid)))}
+            onExpand={(deck, pid, title) => setTermSess({ deck, pid, title })} />
+        )}
+
         {tab === "seats" && fleet.map((e) => (
           <SeatsBlock key={e.deck.id} e={e} showHeader={multi} control={canControl(e)}
             onSwitch={(a) => setSheet(<ConfirmSwitch label={seatLabel(a)} onCancel={() => setSheet(null)}
@@ -318,11 +343,36 @@ export default function App() {
             is self-sufficient. Same data as the header, one source. */}
         <div className="navbrand"><div className="logo"><Mascot size={24} /></div>
           <div className="wordmark mono">cuxdeck<span className="cur">_</span></div></div>
-        {(["deck", "seats", "projects", "settings"] as const).map((tb) => (
-          <button key={tb} className={tab === tb ? "on" : ""} onClick={() => { setTab(tb); window.scrollTo({ top: 0 }); }}>
+        {(["deck", "grid", "seats", "projects", "settings"] as const).map((tb) => (
+          <button key={tb} className={(tab === tb ? "on" : "") + (tb === "grid" ? " navgrid" : "")}
+            onClick={() => { setTab(tb); window.scrollTo({ top: 0 }); }}>
             <NavIcon name={tb} />{t(tb[0].toUpperCase() + tb.slice(1))}
+            {tb === "grid" && tiles.length > 0 && <span className="navcount">{tiles.length}</span>}
           </button>
         ))}
+        {/* Rail-only session list: every live session across the fleet,
+            one click to tile it into the workspace (or back out). The
+            phone never sees this — its flow stays card-first. */}
+        <div className="navsessions">
+          <div className="nslabel">{t("Sessions")}</div>
+          {fleet.flatMap((e) => (e.online && e.snap ? e.snap.sessions.map((s) => {
+            const on = tiles.some((x) => x.deckId === e.deck.id && x.pid === s.pid);
+            const seat = s.seat ? s.seat.split("@")[0] : "—";
+            const canTerm = s.attachable && canControl(e);
+            return (
+              <button key={e.deck.id + s.pid} className={"nsrow" + (on ? " on" : "")}
+                title={s.cwd + " · " + seat}
+                onClick={() => {
+                  if (canTerm) { toggleTile(e.deck.id, s.pid, shortDir(s.cwd), seat); setTab("grid"); }
+                  else openChat(e.deck, "/api/session/" + s.pid + "/chat", shortDir(s.cwd), t("seat ") + seat);
+                }}>
+                <span className="dot" style={{ color: stateColor[s.state] || "var(--dim)" }} />
+                <span className="grow ellip">{shortDir(s.cwd)}</span>
+                <span className="nsseat">{seat}</span>
+              </button>
+            );
+          }) : []))}
+        </div>
         <div className="navhost"><span className={"pulse" + (anyOnline ? "" : anyConnecting ? " connecting" : " off")}></span>
           <span>{multi ? fleet.length + " " + t("machines") : machineName(fleet[0] || { deck: decks[0] } as Entry)}</span></div>
       </nav>
@@ -339,11 +389,79 @@ export default function App() {
 function NavIcon({ name }: { name: string }) {
   const paths: Record<string, React.ReactNode> = {
     deck: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></>,
+    grid: <><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></>,
     seats: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" /></>,
     projects: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.06-.4.1-.8.1-1.2z" /></>,
   };
   return <svg viewBox="0 0 24 24">{paths[name]}</svg>;
+}
+
+// Workspace is the big-screen composition surface: every tile is one
+// live terminal (its own socket, its own grid), laid out in 1–3 columns
+// the user picks — three stacked panes, a 2×2 wall, whatever the run
+// needs. Tiles come from the rail's session list; expand pops the same
+// session into the full-screen Term without disturbing its siblings
+// (separate mount, the PTY multicasts to both).
+function Workspace({ fleet, tiles, cols, setCols, onClose, onExpand }: {
+  fleet: Entry[]; tiles: Array<{ deckId: string; pid: number; title: string; sub: string }>;
+  cols: number; setCols: (n: number) => void;
+  onClose: (deckId: string, pid: number) => void;
+  onExpand: (deck: Deck, pid: number, title: string) => void;
+}) {
+  return (
+    <>
+      <div className="row wsbar">
+        <div className="section-label" style={{ flex: 1, margin: 0 }}>{t("Grid")}</div>
+        <div className="seg wscols">
+          {[1, 2, 3].map((n) => (
+            <button key={n} className={"segbtn" + (cols === n ? " on" : "")} onClick={() => setCols(n)}>{n}</button>
+          ))}
+        </div>
+      </div>
+      {!tiles.length && (
+        <div className="card empty"><div className="art"><EmptyIconBase>
+          <rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" />
+          <rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" />
+        </EmptyIconBase></div>
+          <b>{t("Nothing tiled yet")}</b>{t("Pick sessions from the list on the left — each opens here as a live terminal.")}</div>
+      )}
+      {tiles.length > 0 && (
+        <div className="wswrap" style={{ "--wscols": cols } as React.CSSProperties}>
+          {tiles.map(({ deckId, pid, title, sub }) => {
+            const e = fleet.find((x) => x.deck.id === deckId);
+            const alive = e && e.online && e.snap?.sessions.some((s) => s.pid === pid);
+            const state = e?.snap?.sessions.find((s) => s.pid === pid)?.state;
+            return (
+              <div key={deckId + "·" + pid} className="wstile">
+                <div className="wthead">
+                  <span className="dot" style={{ color: alive ? stateColor[state || ""] || "var(--dim)" : "var(--faint)" }} />
+                  <b className="ellip">{title}</b>
+                  <span className="sub ellip">{sub}</span>
+                  <span className="grow" />
+                  {e && <button className="wtbtn" title={t("full screen")}
+                    onClick={() => onExpand(e.deck, pid, title)}>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"
+                      strokeLinecap="round"><path d="M9 3H3v6M15 3h6v6M9 21H3v-6M15 21h6v-6" /></svg>
+                  </button>}
+                  <button className="wtbtn" title={t("close tile")} onClick={() => onClose(deckId, pid)}>
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2"
+                      strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                  </button>
+                </div>
+                <div className="wtbody">
+                  {e && alive
+                    ? <TermView deck={e.deck} pid={pid} />
+                    : <div className="empty" style={{ padding: "30px 16px" }}>
+                      <b>{e ? t("session ended") : t("unable to connect")}</b></div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
 }
 
 // MachineHeader labels a machine's section in the fleet and shows
@@ -394,14 +512,17 @@ function groupByProject(sessions: Session[], convs: Conv[]): ProjectGroup[] {
   });
 }
 
+// stateColor maps a session's wrapper state to its dot color, shared by
+// the project cards, the rail's session list, and workspace tile heads.
+const stateColor: Record<string, string> = {
+  running: "var(--ok)", "waiting-reset": "var(--warn)", retrying: "var(--bad)", swapping: "var(--info)",
+};
+
 function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
   g: ProjectGroup; control: boolean;
   onOpenConv: (c: Conv) => void; onOpenSession: (s: Session) => void; onOpenTerm: (s: Session) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const stateColor: Record<string, string> = {
-    running: "var(--ok)", "waiting-reset": "var(--warn)", retrying: "var(--bad)", swapping: "var(--info)",
-  };
   const live = g.sessions.length;
   const liveHistory = g.history.filter((c) => c.active);
   const past = g.history.filter((c) => !c.active);

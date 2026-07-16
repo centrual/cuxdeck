@@ -2,6 +2,12 @@
 // bridge to the wrapper's PTY socket. Everything a keyboard can do
 // works here: typing, Enter, Ctrl+C, arrows. A quick-key bar covers
 // what mobile keyboards can't type.
+//
+// Two faces, one engine: TermView is the self-contained terminal
+// (xterm + socket + sizing), so it can be mounted anywhere — the
+// phone's full-screen overlay (Term) and the desktop workspace's grid
+// tiles both render the same component; each instance owns its own
+// socket and grid, so several sessions can be live side by side.
 
 import { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
@@ -61,42 +67,16 @@ function useKeyboardHeight(): number {
   return h;
 }
 
-export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; title: string; onClose: () => void }) {
+// TermView mounts one live terminal into whatever box contains it and
+// keeps it fitted to that box (ResizeObserver — grid reflows, keyboard,
+// rotation all land there). autoFocus is opt-in: the overlay wants the
+// keyboard up immediately, but grid tiles must not fight each other for
+// focus — xterm focuses on click, which is the right desktop behavior.
+// onSendReady hands the caller a raw-bytes sender for quick-key bars.
+export function TermView({ deck, pid, autoFocus, onSendReady }: {
+  deck: Deck; pid: number; autoFocus?: boolean; onSendReady?: (send: (bytes: string) => void) => void;
+}) {
   const holder = useRef<HTMLDivElement>(null);
-  const head = useRef<HTMLDivElement>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const reflowRef = useRef<() => void>(() => {});
-  const kbHeight = useKeyboardHeight();
-  // manualOpen is the explicit toggle in the header — the bar otherwise
-  // only ever appears because the on-screen keyboard opened, which means
-  // esc/arrows/mode were unreachable without first tapping into a text
-  // input. Either signal shows it; --kb-height stays whatever the real
-  // keyboard height is (0 when it's not up), so a manual open with no
-  // keyboard docks the bar to the screen's bottom edge, and it still
-  // slides up correctly if the keyboard opens afterward.
-  const [manualOpen, setManualOpen] = useState(false);
-  const barVisible = kbHeight > 0 || manualOpen;
-
-  // Keep the terminal sized to what's actually visible: full flex
-  // height while the keyboard is closed, or (visualViewport − header
-  // − bar) once it opens, so the last lines never end up hidden
-  // behind the keyboard or the bar sitting above it.
-  useEffect(() => {
-    if (!holder.current) return;
-    if (!barVisible) {
-      holder.current.style.flex = "1";
-      holder.current.style.height = "";
-    } else {
-      // visualViewport.height already excludes the open keyboard —
-      // it's the truly visible area, so only the header and the bar
-      // itself need to be carved out of it.
-      const vh = window.visualViewport?.height ?? window.innerHeight;
-      const headH = head.current?.offsetHeight ?? 60;
-      holder.current.style.flex = "0 0 auto";
-      holder.current.style.height = Math.max(80, vh - headH - BAR_H) + "px";
-    }
-    reflowRef.current();
-  }, [barVisible]);
 
   useEffect(() => {
     const term = new Terminal({
@@ -112,8 +92,12 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
 
     const ws = new WebSocket(wsURL(deck, "/api/session/" + pid + "/term", deck.token));
     ws.binaryType = "arraybuffer";
-    wsRef.current = ws;
     const enc = new TextEncoder();
+    if (onSendReady) {
+      onSendReady((bytes: string) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(frame(FRAME_INPUT, enc.encode(bytes)));
+      });
+    }
 
     const sendResize = () => {
       if (ws.readyState !== WebSocket.OPEN || term.cols < 1 || term.rows < 1) return;
@@ -140,7 +124,8 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
     // Fitting synchronously at open can measure a stale monospace cell and
     // over-count columns. Fit once the container is laid out (next frame)
     // and again once font metrics are final, then keep it correct with a
-    // ResizeObserver — that also covers the on-screen keyboard and rotation.
+    // ResizeObserver — that also covers the on-screen keyboard, rotation,
+    // and workspace-grid reflows (column count changes, tiles added).
     requestAnimationFrame(refit);
     if (document.fonts && document.fonts.ready) document.fonts.ready.then(refit).catch(() => {});
     const ro = new ResizeObserver(() => refit());
@@ -227,29 +212,74 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
     el.addEventListener("touchmove", onTouchMove, { passive: false });
 
     const onResize = () => { refit(); };
-    reflowRef.current = onResize;
     window.addEventListener("resize", onResize);
-    document.body.classList.add("chat-open");
-    // Focus so the mobile on-screen keyboard comes up; on a physical
-    // keyboard this is a no-op as far as the bar is concerned — it
-    // only reacts to visualViewport actually shrinking.
-    setTimeout(() => term.focus(), 300);
+    if (autoFocus) {
+      // Focus so the mobile on-screen keyboard comes up; on a physical
+      // keyboard this is a no-op as far as the bar is concerned — it
+      // only reacts to visualViewport actually shrinking.
+      setTimeout(() => term.focus(), 300);
+    }
 
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", onResize);
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
-      document.body.classList.remove("chat-open");
       ws.close();
       term.dispose();
     };
   }, [deck.url, pid]);
 
-  const sendKeys = (bytes: string) => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) ws.send(frame(FRAME_INPUT, new TextEncoder().encode(bytes)));
-  };
+  return <div ref={holder}
+    style={{ height: "100%", minHeight: 0, position: "relative", padding: "6px 4px 0 8px", touchAction: "none" }} />;
+}
+
+// Term is the full-screen face: header with back/quick-key toggles, the
+// on-screen-keyboard-aware quick-key bar, and one TermView filling the
+// rest. The phone flow (and the workspace's expand button) land here.
+export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; title: string; onClose: () => void }) {
+  const wrap = useRef<HTMLDivElement>(null);
+  const head = useRef<HTMLDivElement>(null);
+  const sendRef = useRef<(bytes: string) => void>(() => {});
+  const kbHeight = useKeyboardHeight();
+  // manualOpen is the explicit toggle in the header — the bar otherwise
+  // only ever appears because the on-screen keyboard opened, which means
+  // esc/arrows/mode were unreachable without first tapping into a text
+  // input. Either signal shows it; --kb-height stays whatever the real
+  // keyboard height is (0 when it's not up), so a manual open with no
+  // keyboard docks the bar to the screen's bottom edge, and it still
+  // slides up correctly if the keyboard opens afterward.
+  const [manualOpen, setManualOpen] = useState(false);
+  const barVisible = kbHeight > 0 || manualOpen;
+
+  // Keep the terminal sized to what's actually visible: full flex
+  // height while the keyboard is closed, or (visualViewport − header
+  // − bar) once it opens, so the last lines never end up hidden
+  // behind the keyboard or the bar sitting above it. The wrapper is
+  // resized (not the terminal itself) — TermView's ResizeObserver
+  // notices and refits.
+  useEffect(() => {
+    if (!wrap.current) return;
+    if (!barVisible) {
+      wrap.current.style.flex = "1";
+      wrap.current.style.height = "";
+    } else {
+      // visualViewport.height already excludes the open keyboard —
+      // it's the truly visible area, so only the header and the bar
+      // itself need to be carved out of it.
+      const vh = window.visualViewport?.height ?? window.innerHeight;
+      const headH = head.current?.offsetHeight ?? 60;
+      wrap.current.style.flex = "0 0 auto";
+      wrap.current.style.height = Math.max(80, vh - headH - BAR_H) + "px";
+    }
+  }, [barVisible]);
+
+  // The overlay locks body scroll for the duration (mobile: the page
+  // behind must not pan while a finger drives the terminal).
+  useEffect(() => {
+    document.body.classList.add("chat-open");
+    return () => document.body.classList.remove("chat-open");
+  }, []);
 
   return (
     <div id="chat" className="show" style={{ background: "#0c0a09" }}>
@@ -265,7 +295,9 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
           </svg>
         </button>
       </div>
-      <div ref={holder} style={{ flex: 1, minHeight: 0, padding: "6px 4px 0 8px", touchAction: "none" }} />
+      <div ref={wrap} style={{ flex: 1, minHeight: 0 }}>
+        <TermView deck={deck} pid={pid} autoFocus onSendReady={(s) => { sendRef.current = s; }} />
+      </div>
       {/* Input-accessory-style bar: invisible until an on-screen
           keyboard actually opens (visualViewport shrinks), then
           docked right above it. A physical keyboard never triggers
@@ -275,7 +307,7 @@ export function Term({ deck, pid, title, onClose }: { deck: Deck; pid: number; t
       <div className={"qkeys" + (barVisible ? " show" : "")}
         style={{ "--kb-height": kbHeight + "px" } as React.CSSProperties}>
         {QUICK.map(([label, bytes]) => (
-          <button key={label} onMouseDown={(e) => e.preventDefault()} onClick={() => sendKeys(bytes)}>{label}</button>
+          <button key={label} onMouseDown={(e) => e.preventDefault()} onClick={() => sendRef.current(bytes)}>{label}</button>
         ))}
       </div>
     </div>
