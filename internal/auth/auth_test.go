@@ -130,6 +130,73 @@ func TestPairPreservesViewRole(t *testing.T) {
 	}
 }
 
+// TestRevokeInvitePreventsUse is the core of the "cancel a link I
+// haven't sent yet, or sent to the wrong person" feature: revoking a
+// pending invite by its (non-secret) id kills the code it was issued
+// under, before it's ever scanned.
+func TestRevokeInvitePreventsUse(t *testing.T) {
+	s := newTestStore(t)
+	code, _ := s.NewInvite(RoleView)
+	pending := s.PendingInvites()
+	if len(pending) != 1 {
+		t.Fatalf("want 1 pending invite, got %d", len(pending))
+	}
+	if pending[0].Role != RoleView {
+		t.Fatalf("role = %q, want %q", pending[0].Role, RoleView)
+	}
+	s.RevokeInvite(pending[0].ID)
+	if _, err := s.Pair(code, "late"); err != ErrBadPairing {
+		t.Fatalf("revoked invite: got %v, want ErrBadPairing", err)
+	}
+	if got := s.PendingInvites(); len(got) != 0 {
+		t.Fatalf("want 0 pending invites after revoke, got %d", len(got))
+	}
+}
+
+// TestRevokeInviteIsIdempotent: revoking an unknown/already-used id must
+// not panic or touch other outstanding invites.
+func TestRevokeInviteIsIdempotent(t *testing.T) {
+	s := newTestStore(t)
+	code := s.NewPairingCode(RoleControl)
+	s.RevokeInvite("not-a-real-id")
+	if _, err := s.Pair(code, "still-good"); err != nil {
+		t.Fatalf("unrelated invite should be unaffected: %v", err)
+	}
+}
+
+// TestPendingInvitesExcludesRepairLinks: a per-device reconnect link
+// isn't a user-facing "invite" and shouldn't show up (or be revocable)
+// alongside ones minted from the Share sheet.
+func TestPendingInvitesExcludesRepairLinks(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.Pair(s.NewPairingCode(RoleControl), "phone")
+	if err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	id := s.DeviceList()[0].ID
+	if s.NewRepairCode(id) == "" {
+		t.Fatal("expected a repair code")
+	}
+	if got := s.PendingInvites(); len(got) != 0 {
+		t.Fatalf("repair links should not appear as pending invites, got %d", len(got))
+	}
+}
+
+// TestPendingInvitesExcludesPlainPairingCodes: the menu bar, the panel's
+// "add a phone" card, and tunnel-moved reconnect nudges all mint codes
+// via NewPairingCode, not NewInvite. None of those are the user-facing
+// invite links the Share sheet creates, so they must never show up (or
+// be revocable) in PendingInvites — otherwise revoking one could kill a
+// QR code a phone is mid-scan on.
+func TestPendingInvitesExcludesPlainPairingCodes(t *testing.T) {
+	s := newTestStore(t)
+	s.NewPairingCode(RoleControl)
+	s.NewPairingCode(RoleView)
+	if got := s.PendingInvites(); len(got) != 0 {
+		t.Fatalf("plain pairing codes should not appear as pending invites, got %d", len(got))
+	}
+}
+
 // TestExpiredCodesArePruned checks the map can't grow without bound:
 // expired codes are dropped on the next mint.
 func TestExpiredCodesArePruned(t *testing.T) {

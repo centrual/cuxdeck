@@ -42,6 +42,14 @@ func newCode() string {
 	return base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(raw)[:pairCodeLen]
 }
 
+// newID returns a short random opaque handle — not a secret, just enough
+// to address one device or pending invite without guessing collisions.
+func newID() string {
+	raw := make([]byte, 6)
+	_, _ = rand.Read(raw)
+	return hex.EncodeToString(raw)
+}
+
 // Device is one paired client (a phone, a tablet, a browser).
 type Device struct {
 	ID        string    `json:"id"`
@@ -81,10 +89,30 @@ type Store struct {
 // touch disk — so a daemon restart naturally clears them. When device is
 // non-empty the code re-pairs THAT device (renews its token) instead of
 // creating a new one.
+//
+// id is a separate, non-secret handle for listing/revoking this invite
+// from the panel without ever re-exposing the code itself — the code is
+// shown to the inviter exactly once, at creation, same as a device token
+// is shown only once at pairing.
+//
+// invite marks codes minted by the panel's Invite sheet specifically —
+// NOT every code from NewPairingCode. The menu bar, "add a phone" card,
+// and tunnel-moved reconnect nudges all mint plain pairing codes too, and
+// none of those are the user-facing "invite links" PendingInvites lists.
 type pairEntry struct {
+	id     string
 	role   string
 	exp    time.Time
 	device string
+	invite bool
+}
+
+// PendingInvite is the token-free view of an outstanding invite link, for
+// the panel to list and offer to cancel before it's ever used.
+type PendingInvite struct {
+	ID        string    `json:"id"`
+	Role      string    `json:"role"`
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // DeviceInfo is the token-free view of a paired device.
@@ -125,15 +153,29 @@ func (s *Store) save() {
 // the tunnel banner each mint their own, and a fresh mint must NOT
 // invalidate a code a phone is mid-scan on.
 func (s *Store) NewPairingCode(role string) string {
+	code, _ := s.mint(role, false)
+	return code
+}
+
+// NewInvite is NewPairingCode plus the invite's non-secret id, for the
+// panel's Invite sheet: the one caller that wants to offer "revoke this
+// link" immediately after minting it, and whose codes should later show
+// up in PendingInvites.
+func (s *Store) NewInvite(role string) (code, id string) {
+	return s.mint(role, true)
+}
+
+func (s *Store) mint(role string, invite bool) (code, id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.prunePairings()
-	code := newCode()
+	code = newCode()
+	id = newID()
 	if s.pairings == nil {
 		s.pairings = make(map[string]pairEntry)
 	}
-	s.pairings[code] = pairEntry{role: normRole(role), exp: time.Now().Add(pairingTTL)}
-	return code
+	s.pairings[code] = pairEntry{id: id, role: normRole(role), exp: time.Now().Add(pairingTTL), invite: invite}
+	return code, id
 }
 
 // NewRepairCode mints a single-use code bound to an existing device:
@@ -159,7 +201,7 @@ func (s *Store) NewRepairCode(deviceID string) string {
 	if s.pairings == nil {
 		s.pairings = make(map[string]pairEntry)
 	}
-	s.pairings[code] = pairEntry{role: role, exp: time.Now().Add(pairingTTL), device: deviceID}
+	s.pairings[code] = pairEntry{id: newID(), role: role, exp: time.Now().Add(pairingTTL), device: deviceID}
 	return code
 }
 
@@ -182,6 +224,40 @@ func (s *Store) prunePairings() {
 	for c, e := range s.pairings {
 		if now.After(e.exp) {
 			delete(s.pairings, c)
+		}
+	}
+}
+
+// PendingInvites lists outstanding, not-yet-used invite links (role and
+// expiry only — never the code) so the panel can show what's still
+// redeemable and let the inviter cancel one before it's scanned. Only
+// codes minted via NewInvite (the panel's Invite sheet) qualify — plain
+// pairing codes from the menu bar, "add a phone", and tunnel-moved
+// reconnect nudges are not user-facing invites and are excluded.
+func (s *Store) PendingInvites() []PendingInvite {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.prunePairings()
+	out := make([]PendingInvite, 0, len(s.pairings))
+	for _, e := range s.pairings {
+		if !e.invite {
+			continue
+		}
+		out = append(out, PendingInvite{ID: e.id, Role: e.role, ExpiresAt: e.exp})
+	}
+	return out
+}
+
+// RevokeInvite cancels a not-yet-used invite by its id, so the code it
+// was handed out under stops working even though it was never scanned.
+// Idempotent — revoking an already-used or already-expired id is a no-op.
+func (s *Store) RevokeInvite(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for code, e := range s.pairings {
+		if e.id == id {
+			delete(s.pairings, code)
+			return
 		}
 	}
 }
