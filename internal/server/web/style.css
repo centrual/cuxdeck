@@ -583,6 +583,72 @@ body.chat-open{overflow:hidden;position:fixed;top:0;left:0;right:0;bottom:auto;
 .mhead .moff{font-size:11px;color:var(--bad);font-weight:600}
 .mhead .mconnecting{font-size:11px;color:var(--warn);font-weight:600}
 
+/* ---------- responsive ----------
+   The phone layout is the source of truth; these blocks only relax it.
+   ≥720px  — cards flow into a grid (tablet, small laptop windows)
+   ≥1024px — the bottom tab bar becomes a left console rail and the
+             sticky header folds into it (brand on top, live machine
+             status pinned at the bottom, prompt-style ▍ on the active
+             tab). Overlays (#chat, terminal) stay full-screen — a
+             terminal wants every pixel it can get. */
+.navbrand,.navhost{display:none}
+
+@media (min-width:720px){
+  main{max-width:1100px;display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
+    gap:14px;align-items:start;padding:10px 24px 8px}
+  main>.section-label,main>.row,main>.skel,main>.mhead,main>.card.empty{grid-column:1/-1}
+  main>.section-label{margin-bottom:0}
+  /* Sheets become centered modals — a bottom drawer on a 27" display
+     reads as a lost phone UI. Same transition feel, new resting place. */
+  #sheet{left:50%;right:auto;bottom:auto;top:50%;width:min(480px,92vw);
+    border-radius:20px;border-bottom:1px solid var(--line);
+    padding:24px 24px 26px;opacity:0;pointer-events:none;
+    transform:translate(-50%,-46%) scale(.98);
+    transition:transform .25s cubic-bezier(.2,.8,.25,1),opacity .2s;
+    box-shadow:0 30px 80px -20px #000c}
+  #sheet.show{transform:translate(-50%,-50%) scale(1);opacity:1;pointer-events:auto}
+  #sheet .grip{display:none}
+}
+
+@media (min-width:1024px){
+  body{padding-left:232px;padding-bottom:40px}
+  header{display:none}
+  nav{left:0;right:auto;top:0;bottom:0;width:232px;flex-direction:column;gap:2px;
+    padding:16px 12px 18px;border-top:0;border-right:1px solid var(--line);
+    background:linear-gradient(180deg,#14100d,#0d0a09)}
+  nav button{flex:0 0 auto;flex-direction:row;justify-content:flex-start;gap:11px;
+    font-size:13.5px;padding:10px 12px;border-radius:10px;position:relative;
+    transition:color .15s,background .15s}
+  nav button svg{width:19px;height:19px}
+  nav button:hover{color:var(--dim);background:#ffffff06}
+  nav button.on{color:var(--fg);background:#ff8b6a12}
+  /* the active tab carries a prompt caret, same voice as `cuxdeck_` */
+  nav button.on::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
+    border-radius:99px;background:var(--acc)}
+  .navbrand{display:flex;align-items:center;gap:9px;padding:2px 6px 16px;
+    border-bottom:1px solid var(--line);margin-bottom:10px}
+  .navbrand .logo{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;
+    background:#171210;border:1px solid var(--line);padding:3px}
+  .navbrand .wordmark{font-size:17px;font-weight:800;letter-spacing:-.5px;color:var(--fg)}
+  .navhost{display:flex;align-items:center;gap:8px;margin-top:auto;padding:12px 8px 0;
+    border-top:1px solid var(--line);font-size:12.5px;color:var(--dim);font-weight:600;min-width:0}
+  .navhost span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  main{max-width:1280px;padding:28px 32px}
+  .fab{bottom:28px;right:28px}
+  #toast{bottom:32px;left:calc(50% + 116px)}
+}
+
+/* pointer niceties — only where a real pointer exists, so nothing
+   changes on touch */
+@media (hover:hover){
+  .btn:hover{filter:brightness(1.1)}
+  .btn.ghost:hover{background:#ffffff10;filter:none}
+  .btn.danger:hover{background:#f8717122;filter:none}
+  .srow.tappable:hover{background:#ffffff05;border-radius:8px}
+  .morebar:hover{color:var(--fg)}
+  nav button{cursor:pointer}
+}
+
 /* ---------- Telegram connect wizard ---------- */
 .tgstep{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
 .tgstep:first-of-type{border-top:0}

@@ -312,11 +312,19 @@ export default function App() {
       </main>
 
       <nav>
+        {/* navbrand/navhost render always but only display on ≥1024px,
+            where the bar becomes a left rail and the header hides — the
+            brand and the live machine status move in here so the rail
+            is self-sufficient. Same data as the header, one source. */}
+        <div className="navbrand"><div className="logo"><Mascot size={24} /></div>
+          <div className="wordmark mono">cuxdeck<span className="cur">_</span></div></div>
         {(["deck", "seats", "projects", "settings"] as const).map((tb) => (
           <button key={tb} className={tab === tb ? "on" : ""} onClick={() => { setTab(tb); window.scrollTo({ top: 0 }); }}>
             <NavIcon name={tb} />{t(tb[0].toUpperCase() + tb.slice(1))}
           </button>
         ))}
+        <div className="navhost"><span className={"pulse" + (anyOnline ? "" : anyConnecting ? " connecting" : " off")}></span>
+          <span>{multi ? fleet.length + " " + t("machines") : machineName(fleet[0] || { deck: decks[0] } as Entry)}</span></div>
       </nav>
 
       <div id="veil" className={sheet ? "show" : ""} onClick={() => setSheet(null)} />
