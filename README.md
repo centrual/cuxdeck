@@ -9,7 +9,7 @@ from any browser on Earth. No accounts. No app store. No servers of ours
 in the middle. You install it, and it just works.*
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/centrual/cuxdeck?color=brightgreen)](https://github.com/centrual/cuxdeck/releases/latest)
+[![Release](https://badgen.net/github/release/centrual/cuxdeck?color=green)](https://github.com/centrual/cuxdeck/releases/latest)
 [![Companion to cux](https://img.shields.io/badge/companion%20to-cux-8A2BE2.svg)](https://github.com/inulute/cux)
 
 </div>
