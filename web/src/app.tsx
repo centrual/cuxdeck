@@ -25,13 +25,30 @@ type Snapshot = {
 };
 type Conv = { id: string; cwd: string; title: string; updatedAt: string; active: boolean };
 type Device = { id: string; name: string; createdAt: string; lastSeen: string };
+type PendingInvite = { id: string; role: string; expiresAt: string };
 
 // One machine's live state: the connection, its latest snapshot and
-// conversations, whether the last fetch reached it, and this device's
-// role on it ("control" or "view" — view hides every mutating control).
-type Entry = { deck: Deck; snap: Snapshot | null; convs: Conv[]; online: boolean; role: string };
+// conversations, whether the last fetch reached it, this device's role
+// on it ("control" or "view" — view hides every mutating control), and
+// (when unreachable) the moment it first stopped answering.
+type Entry = { deck: Deck; snap: Snapshot | null; convs: Conv[]; online: boolean; role: string; offlineSince?: number };
 
 const canControl = (e: Entry) => e.role !== "view";
+
+// A tunnel restart or a blip in connectivity looks identical, at first,
+// to the machine being truly gone — both just fail one poll. Reporting
+// "unreachable" immediately reads as a hard failure when it's usually
+// resolved by the next poll or two; holding the label at "connecting"
+// for a short grace window (a few poll cycles) before escalating avoids
+// that false alarm, and it costs nothing when the machine really is down
+// since "unreachable" still follows once the window elapses.
+const RECONNECT_GRACE_MS = 15000;
+type ConnState = "online" | "connecting" | "unreachable";
+const connState = (e: Entry): ConnState => {
+  if (e.online) return "online";
+  if (e.offlineSince && Date.now() - e.offlineSince < RECONNECT_GRACE_MS) return "connecting";
+  return "unreachable";
+};
 
 const cacheKey = (a: Account) => (a.uuid && a.orgUuid ? a.uuid + "|" + a.orgUuid : a.orgUuid || a.email);
 const seatLabel = (a: Account) => a.alias || a.email.split("@")[0];
@@ -63,6 +80,74 @@ function Ring({ pct, cap }: { pct: number | null; cap: string }) {
 
 function Mascot({ size }: { size: number }) {
   return <img src="/onion.svg" width={size} height={size} style={{ imageRendering: "pixelated" }} alt="" />;
+}
+
+/* ---------- empty-state icons — line art, not emoji, so they read as
+   part of the same system as the nav icons rather than borrowed glyphs
+   that render differently per platform/font. ---------- */
+function EmptyIconBase({ children }: { children: React.ReactNode }) {
+  return (
+    <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor"
+      strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">{children}</svg>
+  );
+}
+// Signal strength, with a diagonal strike when the machine has given up
+// reconnecting — "connecting" gets the plain (animated via CSS) version.
+function SignalIcon({ down }: { down: boolean }) {
+  return (
+    <EmptyIconBase>
+      <path d="M3 8.5a13 13 0 0 1 18 0" />
+      <path d="M6.5 12a8 8 0 0 1 11 0" />
+      <path d="M10 15.5a3 3 0 0 1 4 0" />
+      <circle cx="12" cy="19" r=".6" fill="currentColor" stroke="none" />
+      {down && <path d="M3 3l18 18" />}
+    </EmptyIconBase>
+  );
+}
+function MoonIcon() {
+  return <EmptyIconBase><path d="M20 14.6A8.5 8.5 0 1 1 9.4 4a7 7 0 0 0 10.6 10.6z" /></EmptyIconBase>;
+}
+// Same glyph as the Seats tab's nav icon, so an empty seats list points
+// visually back at the tab it's describing.
+function SeatsGlyph() {
+  return <EmptyIconBase><circle cx="12" cy="8" r="3.5" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" /></EmptyIconBase>;
+}
+// Same glyph as the Projects tab's nav icon, for the same reason.
+function FolderGlyph() {
+  return <EmptyIconBase><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></EmptyIconBase>;
+}
+function WarnIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: -2, marginRight: 4, flex: "none" }}>
+      <path d="M12 3.5 2.5 20h19z" /><path d="M12 9.5v4" /><circle cx="12" cy="17" r=".6" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+function ClockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" style={{ verticalAlign: -1, marginRight: 4, flex: "none" }}>
+      <circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" />
+    </svg>
+  );
+}
+
+// The shared "can't reach this machine" card for every tab — reads as
+// "connecting…" for a grace window after the first missed poll, only
+// escalating to "unable to connect" if that window elapses. See
+// connState's comment for why that grace window exists.
+function ConnStateCard({ e }: { e: Entry }) {
+  if (connState(e) === "connecting") {
+    return (
+      <div className="card empty"><div className="art connecting"><SignalIcon down={false} /></div>
+        <b>{t("Connecting…")}</b>{t("Reaching this machine — hang on a moment.")}</div>
+    );
+  }
+  return (
+    <div className="card empty"><div className="art"><SignalIcon down /></div>
+      <b>{t("Unable to connect")}</b>{t("This machine's tunnel is down or it's offline.")}</div>
+  );
 }
 
 // The real Telegram mark (blue disc + paper plane) so the wizard is
@@ -104,10 +189,15 @@ export default function App() {
   // revoked); the others keep working.
   useEffect(() => setUnauthorizedHandler((d) => { removeDeck(d.id); setDecks(getDecks()); }), []);
 
+  // Tracks the previous round's entries outside React state so refresh()
+  // can read each deck's offlineSince without depending on (and thus
+  // re-running the polling effect for) fleet itself.
+  const fleetRef = useRef<Entry[]>([]);
   const refresh = useCallback(async () => {
     const ds = getDecks();
     if (!ds.length) return;
     const entries = await Promise.all(ds.map(async (deck): Promise<Entry> => {
+      const prevOfflineSince = fleetRef.current.find((e) => e.deck.id === deck.id)?.offlineSince;
       try {
         const snap = await api<Snapshot>(deck, "/api/deck");
         let convs: Conv[] = [];
@@ -116,8 +206,9 @@ export default function App() {
         try { role = (await api<{ role: string }>(deck, "/api/me")).role || "control"; } catch { /* default control */ }
         noteDeckMeta(deck.url, snap.deckId, snap.hostname);
         return { deck, snap, convs, online: true, role };
-      } catch { return { deck, snap: null, convs: [], online: false, role: "control" }; }
+      } catch { return { deck, snap: null, convs: [], online: false, role: "control", offlineSince: prevOfflineSince ?? Date.now() }; }
     }));
+    fleetRef.current = entries;
     setFleet(entries);
     setDecks(getDecks()); // pick up hostnames learned this round
   }, []);
@@ -174,6 +265,7 @@ export default function App() {
 
   const openChat = (deck: Deck, path: string, title: string, sub: string) => setChat({ deck, path, title, sub });
   const anyOnline = fleet.some((e) => e.online);
+  const anyConnecting = !anyOnline && fleet.some((e) => connState(e) === "connecting");
   const multi = fleet.length > 1;
 
   return (
@@ -182,7 +274,7 @@ export default function App() {
         <div className="brand">
           <div className="logo"><Mascot size={24} /></div>
           <h1 className="mono">cuxdeck<span className="cur">_</span></h1>
-          <div className="host"><span className={"pulse" + (anyOnline ? "" : " off")}></span>
+          <div className="host"><span className={"pulse" + (anyOnline ? "" : anyConnecting ? " connecting" : " off")}></span>
             <span>{multi ? fleet.length + " " + t("machines") : machineName(fleet[0] || { deck: decks[0] } as Entry)}</span></div>
         </div>
       </header>
@@ -249,11 +341,13 @@ function NavIcon({ name }: { name: string }) {
 // MachineHeader labels a machine's section in the fleet and shows
 // whether it's currently reachable.
 function MachineHeader({ e }: { e: Entry }) {
+  const cs = connState(e);
   return (
     <div className="mhead">
-      <span className={"mdot" + (e.online ? "" : " off")} />
+      <span className={"mdot" + (cs === "online" ? "" : cs === "connecting" ? " connecting" : " off")} />
       <span className="mname">{machineName(e)}</span>
-      {!e.online && <span className="moff">{t("unreachable")}</span>}
+      {cs === "connecting" && <span className="mconnecting">{t("connecting…")}</span>}
+      {cs === "unreachable" && <span className="moff">{t("unreachable")}</span>}
       {e.snap && <span className="msub">{e.snap.os}</span>}
     </div>
   );
@@ -303,18 +397,20 @@ function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
   const live = g.sessions.length;
   const liveHistory = g.history.filter((c) => c.active);
   const past = g.history.filter((c) => !c.active);
-  const edge = live || liveHistory.length ? "var(--ok)" : "var(--line)";
+  const isLive = live > 0 || liveHistory.length > 0;
 
   return (
-    <div className="card" style={{ borderLeft: "3px solid " + edge }}>
-      <div className="row">
+    <div className="card">
+      <div className="row" style={{ alignItems: "flex-start" }}>
         <div className="grow"><h3 className="ellip">{shortDir(g.dir)}</h3>
-          <div className="sub">{live
-            ? <><b style={{ color: "var(--ok)" }}>● {live} {t("running")}</b>{live > 1 ? " · " + live + " " + t("seats") : ""}</>
-            : liveHistory.length ? <b style={{ color: "var(--ok)" }}>{t("● live (outside cux)")}</b>
+          {!live && (
+            <div className="sub">{liveHistory.length
+              ? t("not managed by cux")
               : <>{g.history.length} conversation{g.history.length === 1 ? "" : "s"} · {ago(new Date(g.lastAt).toISOString())} {t("ago")}</>}
-          </div>
+            </div>
+          )}
         </div>
+        {isLive && <span className="badge running">{live > 0 ? live + " " + t("running") : t("live")}</span>}
       </div>
 
       {g.sessions.map(({ s, conv }) => {
@@ -326,7 +422,7 @@ function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
         return (
           <div key={s.pid} className="srow tappable"
             onClick={() => (canTerm ? onOpenTerm(s) : conv ? onOpenConv(conv) : onOpenSession(s))}>
-            <span className="dot" style={{ color: stateColor[s.state] || "var(--dim)" }}>▎</span>
+            <span className="dot" style={{ color: stateColor[s.state] || "var(--dim)" }} />
             <div className="grow" style={{ minWidth: 0 }}>
               <div className="ellip" style={{ fontWeight: 600 }}>{conv?.title || t("(starting…)")}</div>
               <div className="sub">{t("seat ")}<b>{s.seat ? s.seat.split("@")[0] : "—"}</b> · {t("up")} {ago(s.startedAt)}
@@ -339,10 +435,10 @@ function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
 
       {liveHistory.map((c) => (
         <div key={c.id} className="srow tappable" onClick={() => onOpenConv(c)}>
-          <span className="dot" style={{ color: "var(--ok)" }}>▎</span>
+          <span className="dot" style={{ color: "var(--ok)" }} />
           <div className="grow" style={{ minWidth: 0 }}>
             <div className="ellip" style={{ fontWeight: 600 }}>{c.title || t("(no messages yet)")}</div>
-            <div className="sub">{t("not managed by cux · ● live")}</div>
+            <div className="sub">{t("not managed by cux")}</div>
           </div>
         </div>
       ))}
@@ -357,7 +453,7 @@ function ProjectCard({ g, control, onOpenConv, onOpenSession, onOpenTerm }: {
           </div>
           {open && past.map((c) => (
             <div key={c.id} className="srow tappable" onClick={() => onOpenConv(c)}>
-              <span className="dot" style={{ color: "var(--faint)" }}>▎</span>
+              <span className="dot" style={{ color: "var(--faint)" }} />
               <div className="grow" style={{ minWidth: 0 }}>
                 <div className="ellip">{c.title || t("(no messages yet)")}</div>
                 <div className="sub">{ago(c.updatedAt)} {t("ago")}</div>
@@ -382,13 +478,12 @@ function MachineBlock({ e, showHeader, control, onOpenSession, onOpenConv, onOpe
   return (
     <>
       <div className="row" style={{ alignItems: "center" }}>
-        {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>{t("Projects")}</div>}
+        {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>{t("Sessions")}</div>}
         {e.online && control && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onNewSession}>{t("＋ new session")}</button>}
       </div>
-      {!e.online && <div className="card empty"><div className="art">📡</div><b>{t("Unreachable")}</b>
-        {t("This machine's tunnel is down or it's offline.")}</div>}
+      {!e.online && <ConnStateCard e={e} />}
       {e.online && !groups.length && (
-        <div className="card empty"><div className="art">🌙</div><b>{t("All quiet")}</b>
+        <div className="card empty"><div className="art"><MoonIcon /></div><b>{t("All quiet")}</b>
           {t("No sessions or conversations yet.")}</div>
       )}
       {groups.map((g) => (
@@ -453,9 +548,9 @@ function SeatsBlock({ e, showHeader, control, onSwitch }: { e: Entry; showHeader
   return (
     <>
       {showHeader ? <MachineHeader e={e} /> : <div className="section-label">{t("Seats")}</div>}
-      {!e.online && <div className="card empty"><div className="art">📡</div><b>{t("Unreachable")}</b></div>}
+      {!e.online && <ConnStateCard e={e} />}
       {e.online && !accts.length && (
-        <div className="card empty"><div className="art">🪑</div><b>{t("No seats yet")}</b>
+        <div className="card empty"><div className="art"><SeatsGlyph /></div><b>{t("No seats yet")}</b>
           {t("Log in and run ")}<span className="mono">cux add</span>{t(" on the computer.")}</div>
       )}
       {snap && accts.map((a) => {
@@ -477,11 +572,11 @@ function SeatsBlock({ e, showHeader, control, onSwitch }: { e: Entry; showHeader
             </div>
             {u ? (
               <>
-                <div className="row" style={{ gap: 22, justifyContent: "center", padding: "4px 0 20px" }}>
+                <div className="row" style={{ gap: 22, justifyContent: "center", padding: "16px 0 20px", borderTop: "1px solid var(--line)" }}>
                   <Ring pct={f} cap={t("5H USED")} /><Ring pct={d7} cap={t("7D USED")} />
                 </div>
-                {resets.length > 0 && <div className="sub" style={{ textAlign: "center", marginTop: 6, paddingBottom: 4 }}>⏳ {resets.join(" · ")}</div>}
-                {u.token_expired && <div className="sub" style={{ color: "var(--bad)", textAlign: "center" }}>{t("⚠ needs login on the computer")}</div>}
+                {resets.length > 0 && <div className="sub" style={{ textAlign: "center", marginTop: 6, paddingBottom: 4 }}><ClockIcon />{resets.join(" · ")}</div>}
+                {u.token_expired && <div className="sub" style={{ color: "var(--bad)", textAlign: "center" }}><WarnIcon />{t("needs login on the computer")}</div>}
                 {(hist[cacheKey(a)]?.length ?? 0) >= 2 && (
                   <div style={{ marginTop: 4 }}>
                     <div className="sub" style={{ fontSize: 10.5, marginBottom: 2 }}>{t("5H TREND")}</div>
@@ -508,9 +603,9 @@ function ProjectsBlock({ e, showHeader, control, onSeats, onCreate }: {
         {showHeader ? <MachineHeader e={e} /> : <div className="section-label" style={{ flex: 1 }}>{t("Projects")}</div>}
         {e.online && control && <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onCreate}>{t("＋ new")}</button>}
       </div>
-      {!e.online && <div className="card empty"><div className="art">📡</div><b>{t("Unreachable")}</b></div>}
+      {!e.online && <ConnStateCard e={e} />}
       {e.online && !ps.length && (
-        <div className="card empty"><div className="art">📁</div><b>{t("No projects")}</b>
+        <div className="card empty"><div className="art"><FolderGlyph /></div><b>{t("No projects")}</b>
           {t("Pin a directory to chosen seats with ＋ new.")}</div>
       )}
       {snap && ps.map((p) => (
@@ -555,6 +650,10 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
   fleet: Entry[]; toast: (m: string, ms?: number) => void; setSheet: (n: React.ReactNode | null) => void;
   onAddMachine: () => void; onForget: (d: Deck) => void;
 }) {
+  // Bumped whenever an invite is created or revoked so every
+  // PendingInvitesCard refetches, regardless of which machine's sheet
+  // triggered it.
+  const [inviteReload, setInviteReload] = useState(0);
   return (
     <>
       <div className="section-label">{t("Language")}</div>
@@ -576,25 +675,38 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
       <div className="section-label">{t("Notifications")}</div>
       <NotifyCard fleet={fleet} toast={toast} />
       <TelegramCard fleet={fleet} toast={toast} setSheet={setSheet} />
-      <div className="row" style={{ alignItems: "center" }}>
-        <div className="section-label" style={{ flex: 1 }}>{t("Machines in this fleet")}</div>
+      <div className="row" style={{ alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+        <div className="section-label" style={{ flex: 1, margin: 0 }}>{t("Machines in this fleet")}</div>
         <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onAddMachine}>{t("＋ add")}</button>
       </div>
-      {fleet.map((e) => (
-        <div key={e.deck.id} className="card"><div className="row">
-          <div className="grow"><h3>{machineName(e)}</h3>
-            <div className="sub">{e.online ? (e.snap ? t("● online") + " · " + e.snap.os + " · cuxdeck " + e.snap.version : t("● online")) : t("○ unreachable")}
-              {e.deck.url ? "" : " · " + t("this device")}</div></div>
-          {e.deck.url ? <button className="btn danger small" onClick={() => onForget(e.deck)}>{t("forget")}</button> : null}
-        </div></div>
-      ))}
+      {fleet.map((e) => {
+        const cs = connState(e);
+        const label = cs === "online"
+          ? (e.snap ? e.snap.os + " · cuxdeck " + e.snap.version : t("online"))
+          : cs === "connecting" ? t("connecting…") : t("unable to connect");
+        return (
+          <div key={e.deck.id} className="card"><div className="row">
+            <div className="grow"><h3>{machineName(e)}</h3>
+              <div className="sub row" style={{ gap: 6 }}>
+                <span className={"mdot" + (cs === "online" ? "" : cs === "connecting" ? " connecting" : " off")}
+                  style={{ width: 6, height: 6 }} />
+                {label}{e.deck.url ? "" : " · " + t("this device")}
+              </div></div>
+            {e.deck.url ? <button className="btn danger small" onClick={() => onForget(e.deck)}>{t("forget")}</button> : null}
+          </div></div>
+        );
+      })}
       <div className="section-label">{t("Share & team access")}</div>
       {fleet.filter((e) => e.online && canControl(e)).map((e) => (
-        <div key={e.deck.id} className="card"><div className="row">
-          <div className="grow"><h3>{machineName(e)}</h3>
-            <div className="sub">{t("Invite someone to watch or help drive this machine.")}</div></div>
-          <button className="btn ghost small" onClick={() => setSheet(<InviteSheet e={e} toast={toast} />)}>{t("invite")}</button>
-        </div></div>
+        <div key={e.deck.id} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div className="card"><div className="row">
+            <div className="grow"><h3>{machineName(e)}</h3>
+              <div className="sub">{t("Invite someone to watch or help drive this machine.")}</div></div>
+            <button className="btn ghost small" onClick={() => setSheet(<InviteSheet e={e} toast={toast}
+              onCreated={() => setInviteReload((n) => n + 1)} />)}>{t("invite")}</button>
+          </div></div>
+          <PendingInvitesCard e={e} toast={toast} reloadKey={inviteReload} />
+        </div>
       ))}
       {fleet.some((e) => e.online && !canControl(e)) && (
         <div className="card"><div className="sub">{t("You have ")}<b>{t("view-only")}</b>{t(" access to ")}{fleet.filter((e) => !canControl(e)).map(machineName).join(", ")}{t(" — watch and read, but controls are hidden.")}</div></div>
@@ -1078,27 +1190,39 @@ function SpawnSheet({ e, onStart }: { e: Entry; onStart: (dir: string) => void }
 
 // InviteSheet mints a pairing link (remotely, from the panel) with a
 // chosen role, so a teammate can be added without touching the machine.
-function InviteSheet({ e, toast }: { e: Entry; toast: (m: string, ms?: number) => void }) {
+function InviteSheet({ e, toast, onCreated }: { e: Entry; toast: (m: string, ms?: number) => void; onCreated: () => void }) {
   const [role, setRole] = useState<"view" | "control">("view");
   const [link, setLink] = useState("");
+  const [inviteId, setInviteId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [revoked, setRevoked] = useState(false);
   const make = async () => {
     if (busy) return;
     setBusy(true);
     try {
       // The server hands back the public tunnel URL — a teammate can't
       // reach localhost, so never build the link from this origin.
-      const { code, url } = await api<{ code: string; url: string }>(e.deck, "/api/invite", { method: "POST", body: JSON.stringify({ role }) });
+      const { code, id, url } = await api<{ code: string; id: string; url: string }>(e.deck, "/api/invite", { method: "POST", body: JSON.stringify({ role }) });
       const origin = (url || e.deck.url || location.origin).replace(/\/$/, "");
       if (!/^https:\/\//.test(origin)) {
         toast(t("This machine has no public tunnel yet — can't invite remotely"), 4000);
         return;
       }
       setLink(origin + "/#p=" + code);
+      setInviteId(id);
+      onCreated();
     } catch (err) { toast(t("Failed: ") + (err as Error).message, 3600); }
     finally { setBusy(false); }
   };
   const copy = async () => { try { await navigator.clipboard.writeText(link); toast(t("Link copied")); } catch { toast(t("Copy failed — long-press to select")); } };
+  const revokeNow = async () => {
+    try {
+      await api(e.deck, "/api/invites/revoke", { method: "POST", body: JSON.stringify({ id: inviteId }) });
+      setRevoked(true);
+      toast(t("Invite link revoked"));
+      onCreated();
+    } catch (err) { toast(t("Failed: ") + (err as Error).message, 3600); }
+  };
   return (
     <>
       <h2>{t("Invite to ")}{machineName(e)}</h2>
@@ -1116,14 +1240,61 @@ function InviteSheet({ e, toast }: { e: Entry; toast: (m: string, ms?: number) =
           </div>
           <button className="btn" style={{ width: "100%" }} disabled={busy} onClick={make}>{busy ? "…" : t("Create invite link")}</button>
         </>
+      ) : revoked ? (
+        <div className="sub" style={{ textAlign: "center", padding: "10px 0" }}>{t("This link no longer works.")}</div>
       ) : (
         <>
           <div className="sheet-sub">{t("Send this to your teammate — one device, 10 minutes, ")}<b>{role === "view" ? t("view-only") : t("full control")}</b>.</div>
           <div className="field"><input readOnly value={link} onFocus={(ev) => ev.currentTarget.select()} /></div>
           <button className="btn" style={{ width: "100%" }} onClick={copy}>{t("Copy link")}</button>
+          <button className="btn danger" style={{ width: "100%", marginTop: 8 }} onClick={revokeNow}>{t("Revoke this link")}</button>
         </>
       )}
     </>
+  );
+}
+
+// PendingInvitesCard lists invite links minted from this machine that
+// haven't been scanned yet (role + time left, never the code itself —
+// same "shown once, then just an identity" treatment as device tokens),
+// with a revoke button so one sent to the wrong person, or just no
+// longer wanted, can be killed before anyone uses it.
+function PendingInvitesCard({ e, toast, reloadKey }: { e: Entry; toast: (m: string, ms?: number) => void; reloadKey: number }) {
+  const [invites, setInvites] = useState<PendingInvite[] | null>(null);
+  const load = useCallback(() => {
+    api<PendingInvite[]>(e.deck, "/api/invites").then(setInvites).catch(() => {});
+  }, [e.deck]);
+  useEffect(load, [load, reloadKey]);
+  // Poll so an invite that hits its own TTL server-side (pruned on the
+  // next PendingInvites call) drops out of this list on its own, instead
+  // of lingering at "expires in now" until the next create/revoke.
+  useEffect(() => {
+    const id = setInterval(load, 15000);
+    return () => clearInterval(id);
+  }, [load]);
+  useNow(10000);
+  const revoke = async (id: string) => {
+    try {
+      await api(e.deck, "/api/invites/revoke", { method: "POST", body: JSON.stringify({ id }) });
+      toast(t("Invite link revoked"));
+      load();
+    } catch (err) { toast(t("Failed: ") + (err as Error).message, 3600); }
+  };
+  if (!invites || !invites.length) return null;
+  return (
+    <div className="card">
+      <div className="sub" style={{ fontWeight: 700, marginBottom: 2 }}>{t("Pending invite links")}</div>
+      {invites.map((inv) => (
+        <div key={inv.id} className="srow">
+          <div className="grow">
+            <span className="badge active" style={{ textTransform: "none" }}>
+              {inv.role === "view" ? t("View only") : t("Full control")}</span>
+            <div className="sub" style={{ marginTop: 4 }}><ClockIcon />{t("expires in ")}{inTime(inv.expiresAt)}</div>
+          </div>
+          <button className="btn danger small" onClick={() => revoke(inv.id)}>{t("revoke")}</button>
+        </div>
+      ))}
+    </div>
   );
 }
 
