@@ -9,7 +9,7 @@ from any browser on Earth. No accounts. No app store. No servers of ours
 in the middle. You install it, and it just works.*
 
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
-[![Status](https://img.shields.io/badge/status-building%20v1-orange.svg)](#roadmap)
+[![Release](https://img.shields.io/github/v/release/centrual/cuxdeck?color=brightgreen)](https://github.com/centrual/cuxdeck/releases/latest)
 [![Companion to cux](https://img.shields.io/badge/companion%20to-cux-8A2BE2.svg)](https://github.com/inulute/cux)
 
 </div>
@@ -128,19 +128,19 @@ cuxdeck reads [cux](https://github.com/inulute/cux)'s on-disk session registry �
 no patching, no plugin. Everything works against a **stock cux ≥ v0.3.2**:
 sessions, seats, projects, the live conversation view, remote session launch.
 
-The one feature that needs more is the **live in-browser terminal** — mirroring
-and driving a running session from your phone, keystroke for keystroke. It's
-built and works end-to-end: the panel shares the session's real size, so what
-you see on the phone matches the desktop terminal exactly, and touch-scroll
-pages back through the conversation. It rides through cux's seat swaps, since
-the terminal belongs to the wrapper, not to any one login.
+That includes the **live in-browser terminal** — mirroring and driving a
+running session from your phone, keystroke for keystroke. The panel shares
+the session's real size, so what you see on the phone matches the desktop
+terminal exactly, and touch-scroll pages back through the conversation. It
+rides through cux's seat swaps, since the terminal belongs to the wrapper,
+not to any one login.
 
-It depends on cux advertising an attach socket, which lands with
-[inulute/cux#31](https://github.com/inulute/cux/pull/31). On a cux build that
-has attach support it works today; on a stock cux without it, cuxdeck detects
-the absence per session (the `attachable` flag), keeps the terminal button
-hidden, and degrades cleanly. When #31 merges into a cux release, terminals
-light up on their own — no cuxdeck update needed.
+The terminal needs cux's `attach` setting, which is opt-in (off by default)
+as of cux 0.3.2 — cuxdeck flips it on at startup, so it works out of the box;
+only sessions started *before* that need a restart to become attachable.
+Sessions that aren't attachable (or a cux too old to attach) are detected per
+session via the `attachable` flag: the terminal button stays hidden and
+everything else degrades cleanly.
 
 ## How it works
 
@@ -181,10 +181,10 @@ light up on their own — no cuxdeck update needed.
 - **Notifications (Web Push, no third parties)** — subscriptions live with
   your browser's push service, not with our URL, so even when a tunnel address
   rotates the old service worker still receives the *"panel moved — tap to
-  open"* push and the chain never breaks. Planned events: tunnel address
-  changed · all seats exhausted (with the reset countdown) · wait-for-reset
-  resumed · API-outage retry started / recovered · run finished (duration +
-  tokens) · a seat needs re-login. Per-event toggles per machine.
+  open"* push and the chain never breaks. Events: tunnel address changed ·
+  all seats exhausted (with the reset countdown) · wait-for-reset resumed ·
+  API-outage retry started / recovered · session finished (with duration) ·
+  a seat needs re-login. Per-event toggles per machine.
 - **Telegram (optional, first-class)** — a guided flow if you want alerts in a
   channel that outlives any phone: open BotFather with one tap, paste the
   token, send `/start`; cuxdeck catches the chat id and sends a test message.
@@ -221,7 +221,7 @@ light up on their own — no cuxdeck update needed.
 ## Requirements
 
 - [cux](https://github.com/inulute/cux) ≥ 0.3.2 (attach is opt-in from 0.3.2; cuxdeck enables it for you on start)
-- macOS or Linux today · Windows on the roadmap
+- macOS, Linux, or Windows — binaries for all three ship with every release
 - A browser on the device you want to watch from. That's the whole list.
 
 ## Development
