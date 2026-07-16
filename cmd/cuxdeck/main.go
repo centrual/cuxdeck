@@ -26,6 +26,7 @@ import (
 
 	"github.com/centrual/cuxdeck/internal/auth"
 	"github.com/centrual/cuxdeck/internal/cuxcli"
+	"github.com/centrual/cuxdeck/internal/cuxdata"
 	"github.com/centrual/cuxdeck/internal/i18n"
 	"github.com/centrual/cuxdeck/internal/notify"
 	"github.com/centrual/cuxdeck/internal/push"
@@ -133,6 +134,7 @@ func main() {
 	tray.Run(tray.Deps{
 		CurrentURL:        func() string { return local },
 		PairingLink:       func() string { return tunnelBase() + "/#p=" + st.NewPairingCode(auth.RoleControl) },
+		Status:            trayStatus(local),
 		StartAtLoginState: serviceInstalled,
 		SetStartAtLogin: func(on bool) error {
 			if on {
@@ -142,6 +144,58 @@ func main() {
 		},
 		OnQuit: func() { os.Exit(0) },
 	}, daemon)
+}
+
+// trayStatus feeds the menu-bar header: machine name, whether the
+// public tunnel is up (the phone-reachable address differs from the
+// local one), and one line per live cux session. Reads the same
+// on-disk state the panel does — cheap enough to poll.
+func trayStatus(local string) func() tray.Status {
+	return func() tray.Status {
+		name := ""
+		if b, err := os.ReadFile(filepath.Join(home(), "name")); err == nil {
+			name = strings.TrimSpace(string(b))
+		}
+		if name == "" {
+			name, _ = os.Hostname()
+		}
+		tunnelUp := false
+		if b, err := os.ReadFile(filepath.Join(home(), "current-url")); err == nil {
+			u := strings.TrimSpace(string(b))
+			tunnelUp = u != "" && u != local
+		}
+		var rows []string
+		for _, s := range cuxdata.LoadSessions() {
+			seat := s.Seat
+			if i := strings.IndexByte(seat, '@'); i > 0 {
+				seat = seat[:i]
+			}
+			if seat == "" {
+				seat = "—"
+			}
+			row := filepath.Base(s.CWD) + " — " + seat + " · " + shortAge(time.Since(s.StartedAt))
+			if s.State != "" && s.State != "running" {
+				row += " · " + s.State
+			}
+			rows = append(rows, row)
+		}
+		return tray.Status{Machine: name, TunnelUp: tunnelUp, Sessions: rows}
+	}
+}
+
+// shortAge renders an uptime the way the panel does: 2h 04m, 7m, 31s.
+func shortAge(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d >= time.Hour:
+		return fmt.Sprintf("%dh %02dm", int(d.Hours()), int(d.Minutes())%60)
+	case d >= time.Minute:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
 }
 
 // runDaemon is the server + tunnel loop, extracted so the tray can own
