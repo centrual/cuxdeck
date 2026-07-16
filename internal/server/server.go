@@ -93,6 +93,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/session/{pid}/term", s.controlled(s.termBridge))
 	mux.HandleFunc("GET /api/devices", s.authed(s.devices))
 	mux.HandleFunc("POST /api/devices/revoke", s.controlled(s.revoke))
+	mux.HandleFunc("GET /api/invites", s.controlled(s.invites))
+	mux.HandleFunc("POST /api/invites/revoke", s.controlled(s.revokeInvite))
 	mux.HandleFunc("POST /api/spawn", s.controlled(s.spawn))
 	mux.HandleFunc("GET /api/push/key", s.authed(s.pushKey))
 	mux.HandleFunc("POST /api/push/subscribe", s.authed(s.pushSubscribe))
@@ -563,7 +565,9 @@ func (s *Server) invite(w http.ResponseWriter, r *http.Request) {
 	}
 	// The invite must point at the tunnel — a teammate can't reach
 	// localhost — so hand back the code and the public URL together.
-	writeJSON(w, map[string]string{"code": s.Auth.NewPairingCode(in.Role), "url": url})
+	// id lets the panel offer "revoke this link" right away.
+	code, id := s.Auth.NewInvite(in.Role)
+	writeJSON(w, map[string]string{"code": code, "id": id, "url": url})
 }
 
 func (s *Server) devices(w http.ResponseWriter, r *http.Request) {
@@ -579,6 +583,26 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.Auth.Revoke(in.ID)
+	writeJSON(w, map[string]bool{"ok": true})
+}
+
+// invites lists outstanding, not-yet-scanned invite links so the panel
+// can show what's still redeemable and offer to cancel one — revoking
+// the device it eventually creates is a separate, already-covered case;
+// this is for a link that hasn't been used yet at all.
+func (s *Server) invites(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.Auth.PendingInvites())
+}
+
+func (s *Server) revokeInvite(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	s.Auth.RevokeInvite(in.ID)
 	writeJSON(w, map[string]bool{"ok": true})
 }
 
