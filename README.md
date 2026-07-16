@@ -125,7 +125,7 @@ Every release ships a `checksums.txt`; verify with `shasum -a 256 -c`.
 ### Requires cux
 
 cuxdeck reads [cux](https://github.com/inulute/cux)'s on-disk session registry —
-no patching, no plugin. Everything works against a **stock cux ≥ v0.2.11**:
+no patching, no plugin. Everything works against a **stock cux ≥ v0.3.2**:
 sessions, seats, projects, the live conversation view, remote session launch.
 
 The one feature that needs more is the **live in-browser terminal** — mirroring
@@ -220,7 +220,7 @@ light up on their own — no cuxdeck update needed.
 
 ## Requirements
 
-- [cux](https://github.com/inulute/cux) ≥ 0.2.12 (session heartbeat registry)
+- [cux](https://github.com/inulute/cux) ≥ 0.3.2 (attach is opt-in from 0.3.2; cuxdeck enables it for you on start)
 - macOS or Linux today · Windows on the roadmap
 - A browser on the device you want to watch from. That's the whole list.
 

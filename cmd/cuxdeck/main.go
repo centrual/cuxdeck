@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/centrual/cuxdeck/internal/auth"
+	"github.com/centrual/cuxdeck/internal/cuxcli"
 	"github.com/centrual/cuxdeck/internal/i18n"
 	"github.com/centrual/cuxdeck/internal/notify"
 	"github.com/centrual/cuxdeck/internal/push"
@@ -146,6 +147,20 @@ func main() {
 // runDaemon is the server + tunnel loop, extracted so the tray can own
 // the main goroutine and start it in its ready callback.
 func runDaemon(st *auth.Store, port int, noTunnel bool) {
+	// cuxdeck mirrors sessions over the PTY socket cux exposes only when
+	// its `attach` setting is on — and as of cux 0.3.2 that's opt-in (off
+	// by default, since the always-on PTY taxed every session). Turn it on
+	// so cuxdeck works out of the box. It only affects cux sessions
+	// started afterwards, so already-running sessions need a restart.
+	switch st, detail := cuxcli.EnsureAttach(); st {
+	case cuxcli.AttachEnabled:
+		fmt.Fprintln(os.Stderr, "cuxdeck: enabled cux attach — restart any already-running cux sessions to make them attachable")
+	case cuxcli.AttachFailed:
+		fmt.Fprintln(os.Stderr, "cuxdeck: could not enable cux attach (needs cux >= 0.3.2, or run `cux config set attach true` yourself):", detail)
+	case cuxcli.AttachAlreadyOn:
+		// already attachable — nothing to announce
+	}
+
 	// Alerts: Web Push (VAPID keypair + local subs) and Telegram (bot
 	// token + chat id). A single watcher fans cux state changes out to
 	// whichever channels are enabled. All best-effort — if a channel

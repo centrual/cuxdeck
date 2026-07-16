@@ -7,10 +7,12 @@ package cuxcli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
+	"strings"
 	"time"
 )
 
@@ -33,6 +35,39 @@ func run(args ...string) Result {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "cux", args...).CombinedOutput()
 	return Result{OK: err == nil, Output: string(out)}
+}
+
+// AttachResult is the outcome of EnsureAttach.
+type AttachResult int
+
+const (
+	AttachAlreadyOn AttachResult = iota // cux attach was already enabled
+	AttachEnabled                       // cuxdeck just turned it on
+	AttachFailed                        // couldn't enable (cux < 0.3.2, or an error)
+)
+
+// EnsureAttach makes sure cux's `attach` setting is on. cuxdeck mirrors
+// sessions over the PTY socket cux exposes only when attach is enabled,
+// and it's opt-in (off by default) as of cux 0.3.2 — the always-on PTY
+// was taxing every session (inulute/cux#33). It flips the setting on only
+// when it's actually off, so the caller can warn about restarting
+// running sessions exactly when that matters (enabling only affects cux
+// sessions started afterwards). The second return is a detail string for
+// the AttachFailed case.
+func EnsureAttach() (AttachResult, string) {
+	if show := run("config", "show"); show.OK {
+		var cfg struct {
+			Attach bool `json:"attach"`
+		}
+		if json.Unmarshal([]byte(show.Output), &cfg) == nil && cfg.Attach {
+			return AttachAlreadyOn, ""
+		}
+	}
+	if res := run("config", "set", "attach", "true"); res.OK {
+		return AttachEnabled, ""
+	} else {
+		return AttachFailed, strings.TrimSpace(res.Output)
+	}
 }
 
 func ident(s string) (string, error) {
