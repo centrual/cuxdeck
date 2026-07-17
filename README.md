@@ -226,8 +226,7 @@ works. The version-by-version story lives on the
 - **Shareable** — invite a teammate view-only or full-control, revoke the
   link or the device any time.
 
-**Next**: usage cost reporting (once a price signal exists) · a notarized
-macOS build.
+**Next**: a notarized macOS build.
 
 ## Requirements
 
