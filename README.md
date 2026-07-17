@@ -205,18 +205,29 @@ everything else degrades cleanly.
   it renders HTML, it's a cuxdeck client. Add it to your home screen and it
   looks and launches like a native app, with none of the app-store friction.
 
-## Roadmap
+## Where it stands
 
-| Phase | Scope | Status |
-|---|---|---|
-| **v1** | daemon + mobile panel (sessions · seats · projects, view & manage) · QR device pairing · accountless tunnel supervisor · start-at-login | ✅ shipped |
-| **v2** | multi-machine fleet view (one phone, many decks) · read-only live conversation view · full remote terminal · start a session remotely · Web Push events · Telegram connect wizard | ✅ shipped |
-| **v3** | per-seat utilization trend charts · shared team decks (invite with view / control) · menu-bar tray icon · `.dmg` / Homebrew packaging + cross-platform releases | ✅ shipped |
-| next | usage cost (once a price signal exists) · a stable named tunnel option · notarized macOS build | planned |
+Everything below is live today — install from Homebrew, pair a phone, and it
+works. The version-by-version story lives on the
+[releases page](https://github.com/centrual/cuxdeck/releases).
 
-> **Status: usable.** The experience above is real today — install from Homebrew,
-> pair a phone, watch and drive your fleet from anywhere. Watch the repo — it's
-> moving fast.
+- **The fleet, anywhere** — every machine one deck, merged in your browser:
+  sessions, seats, projects; watch and manage. QR pairing, accountless
+  tunnels, start-at-login.
+- **Live inside a session** — the conversation view and a full remote
+  terminal, both riding straight through cux's seat swaps.
+- **A real desktop app, not a stretched phone page** — left rail with the
+  fleet's live sessions, a composable wall of running terminals (stack them,
+  tile them 2–3 across), two-column settings; the phone layout stays its own
+  thing.
+- **It tells you, you don't ask it** — Web Push and Telegram alerts for
+  exhausted seats, resets, retries, finished runs, moved tunnels; a menu-bar
+  icon whose first two lines answer "is it running, can my phone reach it."
+- **Shareable** — invite a teammate view-only or full-control, revoke the
+  link or the device any time.
+
+**Next**: usage cost reporting (once a price signal exists) · a notarized
+macOS build.
 
 ## Requirements
 
