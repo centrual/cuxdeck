@@ -804,73 +804,97 @@ function SettingsTab({ fleet, toast, setSheet, onAddMachine, onForget }: {
   // PendingInvitesCard refetches, regardless of which machine's sheet
   // triggered it.
   const [inviteReload, setInviteReload] = useState(0);
+  // Each section lives in one .setgroup so the desktop's two-column
+  // masonry (CSS columns, break-inside: avoid) can pack sections
+  // without ever splitting a label from its cards. On the phone the
+  // groups just stack — same order, same spacing as before.
   return (
-    <>
-      <div className="section-label">{t("Language")}</div>
-      <LanguageCard />
-      <div className="section-label">{t("Add a phone")}</div>
-      <PairPhoneCard toast={toast} />
-      <div className="section-label">{t("This machine")}</div>
-      {fleet.filter((e) => e.online && canControl(e)).map((e) => (
-        <MachineNameCard key={e.deck.id} e={e} toast={toast} />
-      ))}
-      <div className="section-label">{t("Startup")}</div>
-      {fleet.filter((e) => e.online && canControl(e)).map((e) => (
-        <StartupCard key={e.deck.id} e={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} />
-      ))}
-      <div className="section-label">{t("Software update")}</div>
-      {fleet.filter((e) => e.online && canControl(e)).map((e) => (
-        <UpdateCard key={e.deck.id} e={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} />
-      ))}
-      <div className="section-label">{t("Notifications")}</div>
-      <NotifyCard fleet={fleet} toast={toast} />
-      <TelegramCard fleet={fleet} toast={toast} setSheet={setSheet} />
-      <div className="row" style={{ alignItems: "center", marginTop: 12, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-        <div className="section-label" style={{ flex: 1, margin: 0 }}>{t("Machines in this fleet")}</div>
-        <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onAddMachine}>{t("＋ add")}</button>
+    <div className="setcols">
+      <div className="setgroup">
+        <div className="section-label">{t("Language")}</div>
+        <LanguageCard />
       </div>
-      {fleet.map((e) => {
-        const cs = connState(e);
-        const label = cs === "online"
-          ? (e.snap ? e.snap.os + " · cuxdeck " + e.snap.version : t("online"))
-          : cs === "connecting" ? t("connecting…") : t("unable to connect");
-        return (
-          <div key={e.deck.id} className="card"><div className="row">
-            <div className="grow"><h3>{machineName(e)}</h3>
-              <div className="sub row" style={{ gap: 6 }}>
-                <span className={"mdot" + (cs === "online" ? "" : cs === "connecting" ? " connecting" : " off")}
-                  style={{ width: 6, height: 6 }} />
-                {label}{e.deck.url ? "" : " · " + t("this device")}
-              </div></div>
-            {e.deck.url ? <button className="btn danger small" onClick={() => onForget(e.deck)}>{t("forget")}</button> : null}
-          </div></div>
-        );
-      })}
-      <div className="section-label">{t("Share & team access")}</div>
-      {fleet.filter((e) => e.online && canControl(e)).map((e) => (
-        <div key={e.deck.id} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div className="card"><div className="row">
-            <div className="grow"><h3>{machineName(e)}</h3>
-              <div className="sub">{t("Invite someone to watch or help drive this machine.")}</div></div>
-            <button className="btn ghost small" onClick={() => setSheet(<InviteSheet e={e} toast={toast}
-              onCreated={() => setInviteReload((n) => n + 1)} />)}>{t("invite")}</button>
-          </div></div>
-          <PendingInvitesCard e={e} toast={toast} reloadKey={inviteReload} />
+      <div className="setgroup">
+        <div className="section-label">{t("Add a phone")}</div>
+        <PairPhoneCard toast={toast} />
+      </div>
+      <div className="setgroup">
+        <div className="section-label">{t("This machine")}</div>
+        {fleet.filter((e) => e.online && canControl(e)).map((e) => (
+          <MachineNameCard key={e.deck.id} e={e} toast={toast} />
+        ))}
+      </div>
+      <div className="setgroup">
+        <div className="section-label">{t("Startup")}</div>
+        {fleet.filter((e) => e.online && canControl(e)).map((e) => (
+          <StartupCard key={e.deck.id} e={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} />
+        ))}
+      </div>
+      <div className="setgroup">
+        <div className="section-label">{t("Software update")}</div>
+        {fleet.filter((e) => e.online && canControl(e)).map((e) => (
+          <UpdateCard key={e.deck.id} e={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} />
+        ))}
+      </div>
+      <div className="setgroup">
+        <div className="section-label">{t("Notifications")}</div>
+        <NotifyCard fleet={fleet} toast={toast} />
+        <TelegramCard fleet={fleet} toast={toast} setSheet={setSheet} />
+      </div>
+      <div className="setgroup">
+        <div className="row" style={{ alignItems: "center" }}>
+          <div className="section-label" style={{ flex: 1, margin: 0 }}>{t("Machines in this fleet")}</div>
+          <button className="btn ghost small" style={{ marginLeft: "auto" }} onClick={onAddMachine}>{t("＋ add")}</button>
         </div>
-      ))}
-      {fleet.some((e) => e.online && !canControl(e)) && (
-        <div className="card"><div className="sub">{t("You have ")}<b>{t("view-only")}</b>{t(" access to ")}{fleet.filter((e) => !canControl(e)).map(machineName).join(", ")}{t(" — watch and read, but controls are hidden.")}</div></div>
-      )}
-      <div className="section-label">{t("Paired devices (per machine)")}</div>
-      {fleet.filter((e) => e.online && canControl(e)).map((e) => (
-        <DeviceList key={e.deck.id} entry={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} setSheet={setSheet} />
-      ))}
-      <div className="section-label">{t("About")}</div>
-      <div className="card">
-        <h3>⌁ cuxdeck</h3>
-        <div className="sub" style={{ marginTop: 6 }}>{t("The fleet is assembled here in your browser — each machine is a separate deck with its own tunnel and token. Add another with its pairing link; forget it to drop it.")}</div>
+        {fleet.map((e) => {
+          const cs = connState(e);
+          const label = cs === "online"
+            ? (e.snap ? e.snap.os + " · cuxdeck " + e.snap.version : t("online"))
+            : cs === "connecting" ? t("connecting…") : t("unable to connect");
+          return (
+            <div key={e.deck.id} className="card"><div className="row">
+              <div className="grow"><h3>{machineName(e)}</h3>
+                <div className="sub row" style={{ gap: 6 }}>
+                  <span className={"mdot" + (cs === "online" ? "" : cs === "connecting" ? " connecting" : " off")}
+                    style={{ width: 6, height: 6 }} />
+                  {label}{e.deck.url ? "" : " · " + t("this device")}
+                </div></div>
+              {e.deck.url ? <button className="btn danger small" onClick={() => onForget(e.deck)}>{t("forget")}</button> : null}
+            </div></div>
+          );
+        })}
       </div>
-    </>
+      <div className="setgroup">
+        <div className="section-label">{t("Share & team access")}</div>
+        {fleet.filter((e) => e.online && canControl(e)).map((e) => (
+          <div key={e.deck.id} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div className="card"><div className="row">
+              <div className="grow"><h3>{machineName(e)}</h3>
+                <div className="sub">{t("Invite someone to watch or help drive this machine.")}</div></div>
+              <button className="btn ghost small" onClick={() => setSheet(<InviteSheet e={e} toast={toast}
+                onCreated={() => setInviteReload((n) => n + 1)} />)}>{t("invite")}</button>
+            </div></div>
+            <PendingInvitesCard e={e} toast={toast} reloadKey={inviteReload} />
+          </div>
+        ))}
+        {fleet.some((e) => e.online && !canControl(e)) && (
+          <div className="card"><div className="sub">{t("You have ")}<b>{t("view-only")}</b>{t(" access to ")}{fleet.filter((e) => !canControl(e)).map(machineName).join(", ")}{t(" — watch and read, but controls are hidden.")}</div></div>
+        )}
+      </div>
+      <div className="setgroup">
+        <div className="section-label">{t("Paired devices (per machine)")}</div>
+        {fleet.filter((e) => e.online && canControl(e)).map((e) => (
+          <DeviceList key={e.deck.id} entry={e} label={fleet.length > 1 ? machineName(e) : ""} toast={toast} setSheet={setSheet} />
+        ))}
+      </div>
+      <div className="setgroup">
+        <div className="section-label">{t("About")}</div>
+        <div className="card">
+          <h3>⌁ cuxdeck</h3>
+          <div className="sub" style={{ marginTop: 6 }}>{t("The fleet is assembled here in your browser — each machine is a separate deck with its own tunnel and token. Add another with its pairing link; forget it to drop it.")}</div>
+        </div>
+      </div>
+    </div>
   );
 }
 

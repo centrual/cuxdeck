@@ -593,6 +593,15 @@ body.chat-open{overflow:hidden;position:fixed;top:0;left:0;right:0;bottom:auto;
              terminal wants every pixel it can get. */
 .navbrand,.navhost,.navsessions{display:none}
 
+/* ---------- settings: grouped sections ----------
+   On the phone the groups stack exactly as the flat list did (same
+   gaps). From tablet up they pack into balanced CSS columns —
+   break-inside keeps every label glued to its cards, and the page
+   stops being one skinny column with a mile of dead space beside it. */
+.setcols{display:flex;flex-direction:column;gap:14px}
+.setgroup{display:flex;flex-direction:column;gap:14px}
+.setgroup>.section-label{margin:0 4px -4px}
+
 /* ---------- workspace: the Panel's live wall of terminals ---------- */
 .wsbar .wscols{width:132px;flex:none}
 .wswrap{display:grid;gap:12px;grid-template-columns:repeat(var(--wscols,1),1fr);
@@ -612,17 +621,23 @@ body.chat-open{overflow:hidden;position:fixed;top:0;left:0;right:0;bottom:auto;
 @media (min-width:720px){
   main{max-width:1100px;display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));
     gap:14px;align-items:start;padding:10px 24px 8px}
-  main>.section-label,main>.row,main>.skel,main>.mhead,main>.card.empty,main>.wswrap{grid-column:1/-1}
+  main>.section-label,main>.row,main>.skel,main>.mhead,main>.card.empty,main>.wswrap,main>.setcols{grid-column:1/-1}
+  .setcols{display:block;columns:2;column-gap:16px;max-width:1000px;margin:0 auto;width:100%}
+  .setgroup{break-inside:avoid;margin-bottom:16px}
   main>.section-label{margin-bottom:0}
   /* Sheets become centered modals — a bottom drawer on a 27" display
      reads as a lost phone UI. Same transition feel, new resting place. */
+  /* visibility (with a delay matching the fade) keeps the hidden modal
+     truly out of the page: no tab-focus into its inputs, no ghost in
+     full-page captures — opacity alone leaves both possible */
   #sheet{left:50%;right:auto;bottom:auto;top:50%;width:min(480px,92vw);
     border-radius:20px;border-bottom:1px solid var(--line);
-    padding:24px 24px 26px;opacity:0;pointer-events:none;
+    padding:24px 24px 26px;opacity:0;pointer-events:none;visibility:hidden;
     transform:translate(-50%,-46%) scale(.98);
-    transition:transform .25s cubic-bezier(.2,.8,.25,1),opacity .2s;
+    transition:transform .25s cubic-bezier(.2,.8,.25,1),opacity .2s,visibility 0s .25s;
     box-shadow:0 30px 80px -20px #000c}
-  #sheet.show{transform:translate(-50%,-50%) scale(1);opacity:1;pointer-events:auto}
+  #sheet.show{transform:translate(-50%,-50%) scale(1);opacity:1;pointer-events:auto;
+    visibility:visible;transition-delay:0s}
   #sheet .grip{display:none}
 }
 
