@@ -166,9 +166,9 @@ export default function App() {
   const [fleet, setFleet] = useState<Entry[]>([]);
   // Remember the last tab across reloads so a refresh doesn't bounce you
   // back to Deck.
-  const [tab, setTab] = useState<"deck" | "grid" | "seats" | "projects" | "settings">(() => {
+  const [tab, setTab] = useState<"deck" | "seats" | "projects" | "settings">(() => {
     const saved = localStorage.getItem("cuxdeck-tab");
-    return saved === "grid" || saved === "seats" || saved === "projects" || saved === "settings" ? saved : "deck";
+    return saved === "seats" || saved === "projects" || saved === "settings" ? saved : "deck";
   });
   useEffect(() => { try { localStorage.setItem("cuxdeck-tab", tab); } catch { /* ignore */ } }, [tab]);
   const [chat, setChat] = useState<{ deck: Deck; path: string; title: string; sub: string } | null>(null);
@@ -191,6 +191,22 @@ export default function App() {
     setTiles((ts) => ts.some((x) => tileKey(x.deckId, x.pid) === tileKey(deckId, pid))
       ? ts.filter((x) => tileKey(x.deckId, x.pid) !== tileKey(deckId, pid))
       : [...ts, { deckId, pid, title, sub }]);
+  };
+  // From a card the intent is always "open" — never a toggle that could
+  // silently close a tile you forgot was up. The rail rows toggle (they
+  // show the on-state); the cards only ever add.
+  const addTile = (deckId: string, pid: number, title: string, sub: string) => {
+    setTiles((ts) => ts.some((x) => tileKey(x.deckId, x.pid) === tileKey(deckId, pid))
+      ? ts : [...ts, { deckId, pid, title, sub }]);
+  };
+  // One surface, one behavior: on a big screen every session click lands
+  // in the Panel's live wall; the full-screen terminal is reached from a
+  // tile's expand button as a deliberate escalation. Phones keep the
+  // overlay — there's no wall to compose on a 390px screen.
+  const desktop = useDesktop();
+  const openTerm = (deck: Deck, pid: number, title: string, sub: string) => {
+    if (desktop) { addTile(deck.id, pid, title, sub); window.scrollTo({ top: 0, behavior: "smooth" }); }
+    else setTermSess({ deck, pid, title });
   };
   const [sheet, setSheet] = useState<React.ReactNode | null>(null);
   const [toastMsg, setToastMsg] = useState("");
@@ -301,20 +317,20 @@ export default function App() {
       <main>
         {!fleet.length && <><div className="skel" /><div className="skel" /><div className="skel" /></>}
 
-        {tab === "deck" && fleet.map((e) => (
-          <MachineBlock key={e.deck.id} e={e} showHeader={multi} control={canControl(e)}
-            onOpenSession={(s) => openChat(e.deck, "/api/session/" + s.pid + "/chat", shortDir(s.cwd), t("seat ") + (s.seat ? s.seat.split("@")[0] : "—"))}
-            onOpenConv={(c) => openChat(e.deck, "/api/conversation/" + c.id + "/chat", shortDir(c.cwd || "?"), "")}
-            onOpenTerm={(s) => setTermSess({ deck: e.deck, pid: s.pid, title: shortDir(s.cwd) })}
-            onNewSession={() => setSheet(<SpawnSheet e={e} onStart={(dir) => spawnSession(e.deck, dir)} />)}
-            onRefreshUsage={() => act(e.deck, "usage-refresh", {}, t("Refreshing usage…"))} />
-        ))}
-
-        {tab === "grid" && (
+        {tab === "deck" && desktop && tiles.length > 0 && (
           <Workspace fleet={fleet} tiles={tiles} cols={wsCols} setCols={setWsCols}
             onClose={(deckId, pid) => setTiles((ts) => ts.filter((x) => !(x.deckId === deckId && x.pid === pid)))}
             onExpand={(deck, pid, title) => setTermSess({ deck, pid, title })} />
         )}
+
+        {tab === "deck" && fleet.map((e) => (
+          <MachineBlock key={e.deck.id} e={e} showHeader={multi} control={canControl(e)}
+            onOpenSession={(s) => openChat(e.deck, "/api/session/" + s.pid + "/chat", shortDir(s.cwd), t("seat ") + (s.seat ? s.seat.split("@")[0] : "—"))}
+            onOpenConv={(c) => openChat(e.deck, "/api/conversation/" + c.id + "/chat", shortDir(c.cwd || "?"), "")}
+            onOpenTerm={(s) => openTerm(e.deck, s.pid, shortDir(s.cwd), s.seat ? s.seat.split("@")[0] : "—")}
+            onNewSession={() => setSheet(<SpawnSheet e={e} onStart={(dir) => spawnSession(e.deck, dir)} />)}
+            onRefreshUsage={() => act(e.deck, "usage-refresh", {}, t("Refreshing usage…"))} />
+        ))}
 
         {tab === "seats" && fleet.map((e) => (
           <SeatsBlock key={e.deck.id} e={e} showHeader={multi} control={canControl(e)}
@@ -343,16 +359,15 @@ export default function App() {
             is self-sufficient. Same data as the header, one source. */}
         <div className="navbrand"><div className="logo"><Mascot size={24} /></div>
           <div className="wordmark mono">cuxdeck<span className="cur">_</span></div></div>
-        {(["deck", "grid", "seats", "projects", "settings"] as const).map((tb) => (
-          <button key={tb} className={(tab === tb ? "on" : "") + (tb === "grid" ? " navgrid" : "")}
-            onClick={() => { setTab(tb); window.scrollTo({ top: 0 }); }}>
+        {(["deck", "seats", "projects", "settings"] as const).map((tb) => (
+          <button key={tb} className={tab === tb ? "on" : ""} onClick={() => { setTab(tb); window.scrollTo({ top: 0 }); }}>
             <NavIcon name={tb} />{t(tb[0].toUpperCase() + tb.slice(1))}
-            {tb === "grid" && tiles.length > 0 && <span className="navcount">{tiles.length}</span>}
           </button>
         ))}
-        {/* Rail-only session list: every live session across the fleet,
-            one click to tile it into the workspace (or back out). The
-            phone never sees this — its flow stays card-first. */}
+        {/* Rail-only session list: every live session across the fleet.
+            Same single behavior as the cards — click tiles it into the
+            Panel's live wall (highlighted while tiled; click again to
+            take it down). The phone never sees this list. */}
         <div className="navsessions">
           <div className="nslabel">{t("Sessions")}</div>
           {fleet.flatMap((e) => (e.online && e.snap ? e.snap.sessions.map((s) => {
@@ -363,7 +378,7 @@ export default function App() {
               <button key={e.deck.id + s.pid} className={"nsrow" + (on ? " on" : "")}
                 title={s.cwd + " · " + seat}
                 onClick={() => {
-                  if (canTerm) { toggleTile(e.deck.id, s.pid, shortDir(s.cwd), seat); setTab("grid"); }
+                  if (canTerm) { toggleTile(e.deck.id, s.pid, shortDir(s.cwd), seat); setTab("deck"); window.scrollTo({ top: 0, behavior: "smooth" }); }
                   else openChat(e.deck, "/api/session/" + s.pid + "/chat", shortDir(s.cwd), t("seat ") + seat);
                 }}>
                 <span className="dot" style={{ color: stateColor[s.state] || "var(--dim)" }} />
@@ -389,7 +404,6 @@ export default function App() {
 function NavIcon({ name }: { name: string }) {
   const paths: Record<string, React.ReactNode> = {
     deck: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></>,
-    grid: <><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" /></>,
     seats: <><circle cx="12" cy="8" r="3.5" /><path d="M5 20c0-3.5 3-6 7-6s7 2.5 7 6" /></>,
     projects: <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.7a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.7h4l.4-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.06-.4.1-.8.1-1.2z" /></>,
@@ -397,12 +411,26 @@ function NavIcon({ name }: { name: string }) {
   return <svg viewBox="0 0 24 24">{paths[name]}</svg>;
 }
 
-// Workspace is the big-screen composition surface: every tile is one
+// useDesktop tracks the same breakpoint the CSS rail uses, so behavior
+// (tile vs full-screen) and layout switch together, live on resize.
+function useDesktop(): boolean {
+  const [d, setD] = useState(() => window.matchMedia("(min-width:1024px)").matches);
+  useEffect(() => {
+    const m = window.matchMedia("(min-width:1024px)");
+    const f = () => setD(m.matches);
+    m.addEventListener("change", f);
+    return () => m.removeEventListener("change", f);
+  }, []);
+  return d;
+}
+
+// Workspace is the Panel's live wall on big screens: every tile is one
 // live terminal (its own socket, its own grid), laid out in 1–3 columns
 // the user picks — three stacked panes, a 2×2 wall, whatever the run
-// needs. Tiles come from the rail's session list; expand pops the same
-// session into the full-screen Term without disturbing its siblings
-// (separate mount, the PTY multicasts to both).
+// needs. Any session click (card row or rail list) lands here; expand
+// pops the same session into the full-screen Term without disturbing
+// its siblings (separate mount, the PTY multicasts to both). Rendered
+// only when at least one tile is up, so an empty Panel stays cards-only.
 function Workspace({ fleet, tiles, cols, setCols, onClose, onExpand }: {
   fleet: Entry[]; tiles: Array<{ deckId: string; pid: number; title: string; sub: string }>;
   cols: number; setCols: (n: number) => void;
@@ -419,13 +447,6 @@ function Workspace({ fleet, tiles, cols, setCols, onClose, onExpand }: {
           ))}
         </div>
       </div>
-      {!tiles.length && (
-        <div className="card empty"><div className="art"><EmptyIconBase>
-          <rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" />
-          <rect x="3" y="13" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" />
-        </EmptyIconBase></div>
-          <b>{t("Nothing tiled yet")}</b>{t("Pick sessions from the list on the left — each opens here as a live terminal.")}</div>
-      )}
       {tiles.length > 0 && (
         <div className="wswrap" style={{ "--wscols": cols } as React.CSSProperties}>
           {tiles.map(({ deckId, pid, title, sub }) => {

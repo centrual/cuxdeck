@@ -592,9 +592,8 @@ body.chat-open{overflow:hidden;position:fixed;top:0;left:0;right:0;bottom:auto;
              tab). Overlays (#chat, terminal) stay full-screen — a
              terminal wants every pixel it can get. */
 .navbrand,.navhost,.navsessions{display:none}
-nav button.navgrid{display:none}
 
-/* ---------- workspace: user-composed wall of live terminals ---------- */
+/* ---------- workspace: the Panel's live wall of terminals ---------- */
 .wsbar .wscols{width:132px;flex:none}
 .wswrap{display:grid;gap:12px;grid-template-columns:repeat(var(--wscols,1),1fr);
   grid-auto-rows:minmax(280px,1fr);height:calc(100dvh - 220px);min-height:320px;
@@ -642,11 +641,8 @@ nav button.navgrid{display:none}
   /* the active tab carries a prompt caret, same voice as `cuxdeck_` */
   nav button.on::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;
     border-radius:99px;background:var(--acc)}
-  nav button.navgrid{display:flex}
-  .navcount{margin-left:auto;background:#ff8b6a1f;color:var(--acc);font-size:10.5px;
-    font-weight:800;border-radius:99px;padding:1px 7px}
   /* the rail's live-session list: one row per running session, click
-     to tile it into the workspace (highlighted while tiled) */
+     to tile it into the Panel's live wall (highlighted while tiled) */
   .navsessions{display:flex;flex-direction:column;gap:1px;margin-top:14px;padding-top:12px;
     border-top:1px solid var(--line);flex:1 1 auto;min-height:0;overflow-y:auto}
   .navsessions .nslabel{font-size:10px;font-weight:800;letter-spacing:1.2px;color:var(--faint);
